@@ -45,6 +45,8 @@ SECTIONS
         *(.text.chry_dap_handle);
         *(.text.dap_out_callback);
         *(.text.dap_in_callback);
+        *(.text.usbd_ep_start_read*);
+        *(.text.usbd_ep_start_write*);
         . = ALIGN(4);
         PROVIDE(_highcode_vma_end = .);
     } > RAM AT > FLASH
