@@ -22,8 +22,8 @@
 #define DAP_JTAG_DEV_CNT        1U
 #define DAP_DEFAULT_PORT        1U
 #define DAP_DEFAULT_SWJ_CLOCK   1000000U
-#define DAP_PACKET_SIZE         64U
-#define DAP_PACKET_COUNT        4U
+#define DAP_PACKET_SIZE         2048U
+#define DAP_PACKET_COUNT        1U
 #define SWO_UART                0
 #define SWO_MANCHESTER          0
 #define SWO_STREAM              0
@@ -35,8 +35,8 @@
 #define DAP_UART_RX_BUFFER_SIZE 64U
 #define DAP_UART_TX_BUFFER_SIZE 64U
 #define DAP_FW_VER              "0.1.0"
-#define CONFIG_UARTRX_RINGBUF_SIZE 2048U
-#define CONFIG_USBRX_RINGBUF_SIZE  2048U
+#define CONFIG_UARTRX_RINGBUF_SIZE 1024U
+#define CONFIG_USBRX_RINGBUF_SIZE  1024U
 
 __STATIC_INLINE uint8_t DAP_GetVendorString(char *str) { (void)str; return 0U; }
 __STATIC_INLINE uint8_t DAP_GetProductString(char *str) { (void)str; return 0U; }
