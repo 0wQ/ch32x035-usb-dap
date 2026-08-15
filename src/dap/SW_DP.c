@@ -245,13 +245,15 @@ __attribute__((section(".highcode")))
 
 	/* Turnaround */
 	GPIOA->CFGLR = swdio_cfglr_input;
-	for (n = DAP_Data.swd_conf.turnaround; n; n--)
+	/* CMSIS-DAP initializes and configures turnaround in the range 1..4. */
+	n = DAP_Data.swd_conf.turnaround;
+	do
 	{
 		PIN_SWCLK_CLR();
 		PIN_DELAY_FAST();
 		PIN_SWCLK_SET();
 		PIN_DELAY_FAST();
-	}
+	} while (--n);
 
 	/* Acknowledge response */
 	PIN_SWCLK_CLR();
@@ -302,13 +304,14 @@ __attribute__((section(".highcode")))
 				*data = val;
 			}
 			/* Turnaround */
-			for (n = DAP_Data.swd_conf.turnaround; n; n--)
+			n = DAP_Data.swd_conf.turnaround;
+			do
 			{
 				PIN_SWCLK_CLR();
 				PIN_DELAY_FAST();
 				PIN_SWCLK_SET();
 				PIN_DELAY_FAST();
-			}
+			} while (--n);
 			GPIOA->CFGLR = swdio_cfglr_output;
 		}
 		else
