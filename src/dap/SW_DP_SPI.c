@@ -14,7 +14,7 @@
 #define GPIO_CFG_OUT_PP      0x1U
 #define GPIO_CFG_AF_PP       0x9U
 #define GPIO_CFG_INPUT_FLOAT 0x4U
-#define SWD_SPI_CODE         __attribute__((section(".highcode")))
+#define SWD_SPI_CODE
 
 static uint16_t swd_spi_prescaler;
 static uint8_t swd_spi_active;
@@ -235,7 +235,6 @@ static SWD_SPI_CODE void swd_idle_cycles(void)
     PIN_SWDIO_TMS_SET();
 }
 
-__attribute__((section(".highcode")))
 uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data)
 {
     uint32_t ack;

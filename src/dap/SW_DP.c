@@ -453,7 +453,7 @@ __attribute__((section(".highcode")))
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
 #if (!USE_PIOC_ACC)
-__attribute__((section(".highcode")))
+__attribute__((noinline))
 #endif
  static uint8_t SWD_TransferSlow(
 		uint32_t request, uint32_t *data)
