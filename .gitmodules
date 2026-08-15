@@ -1,0 +1,9 @@
+[submodule "third_party/cherryrb"]
+	path = third_party/cherryrb
+	url = https://github.com/cherry-embedded/CherryRB.git
+[submodule "third_party/cherryusb"]
+	path = third_party/cherryusb
+	url = https://github.com/sakumisu/CherryUSB.git
+[submodule "third_party/cherrydap"]
+	path = third_party/cherrydap
+	url = https://github.com/cherry-embedded/CherryDAP.git
