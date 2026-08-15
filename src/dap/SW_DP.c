@@ -88,6 +88,25 @@ __STATIC_FORCEINLINE uint32_t SWD_Parity32(uint32_t value)
 		val >>= 1;                \
 	} while (0)
 
+__attribute__((section(".highcode"), noinline, optimize("O2")))
+static void SWD_FastWriteData(uint32_t val)
+{
+	uint32_t n;
+	uint32_t parity = SWD_Parity32(val);
+
+	for (n = 8U; n; n--)
+	{
+		SWD_FAST_WRITE_DATA_BIT();
+		SWD_FAST_WRITE_DATA_BIT();
+		SWD_FAST_WRITE_DATA_BIT();
+		SWD_FAST_WRITE_DATA_BIT();
+	}
+	PIN_SWDIO_OUT_SWCLK_CLR(parity);
+	PIN_DELAY_FAST();
+	PIN_SWCLK_SET();
+	PIN_DELAY_FAST();
+}
+
 #if ((DAP_SWD != 0) || (DAP_JTAG != 0))
 // Generate SWJ Sequence
 //   count:  sequence bit count
@@ -326,19 +345,7 @@ __attribute__((section(".highcode")))
 			}
 			GPIOA->CFGLR = swdio_cfglr_output;
 			/* Write data */
-			val = *data;
-			parity = SWD_Parity32(val);
-			for (n = 8U; n; n--)
-			{
-				SWD_FAST_WRITE_DATA_BIT();
-				SWD_FAST_WRITE_DATA_BIT();
-				SWD_FAST_WRITE_DATA_BIT();
-				SWD_FAST_WRITE_DATA_BIT();
-			}
-			PIN_SWDIO_OUT_SWCLK_CLR(parity);
-			PIN_DELAY_FAST();
-			PIN_SWCLK_SET();
-			PIN_DELAY_FAST(); /* Write Parity Bit */
+			SWD_FastWriteData(*data);
 		}
 		/* Capture Timestamp */
 		if (request & DAP_TRANSFER_TIMESTAMP)
