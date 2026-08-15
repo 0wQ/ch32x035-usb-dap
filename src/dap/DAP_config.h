@@ -60,6 +60,12 @@ __STATIC_FORCEINLINE void PIN_SWDIO_OUT(uint32_t bit)
     if ((bit & 1U) != 0U) GPIOA->BSHR = GPIO_Pin_7;
     else GPIOA->BCR = GPIO_Pin_7;
 }
+/* Set SWDIO and pull SWCLK low atomically for the next SWD data bit. */
+__STATIC_FORCEINLINE void PIN_SWDIO_OUT_SWCLK_CLR(uint32_t bit)
+{
+    if ((bit & 1U) != 0U) GPIOA->BSHR = GPIO_Pin_7 | (GPIO_Pin_5 << 16);
+    else GPIOA->BCR = GPIO_Pin_7 | GPIO_Pin_5;
+}
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_ENABLE(void)
 {
     GPIOA->CFGLR = (GPIOA->CFGLR & ~(0xFU << 28)) | (0x1U << 28);

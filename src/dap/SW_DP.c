@@ -72,8 +72,7 @@ uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data);
 
 #define SWD_FAST_WRITE_DATA_BIT() \
 	do {                          \
-		PIN_SWDIO_OUT(val);       \
-		PIN_SWCLK_CLR();          \
+		PIN_SWDIO_OUT_SWCLK_CLR(val); \
 		PIN_DELAY_FAST();         \
 		PIN_SWCLK_SET();          \
 		PIN_DELAY_FAST();         \
@@ -325,8 +324,7 @@ __attribute__((section(".highcode")))
 				SWD_FAST_WRITE_DATA_BIT();
 				SWD_FAST_WRITE_DATA_BIT();
 			}
-			PIN_SWDIO_OUT(parity);
-			PIN_SWCLK_CLR();
+			PIN_SWDIO_OUT_SWCLK_CLR(parity);
 			PIN_DELAY_FAST();
 			PIN_SWCLK_SET();
 			PIN_DELAY_FAST(); /* Write Parity Bit */
