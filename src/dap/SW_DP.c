@@ -79,6 +79,18 @@ __STATIC_FORCEINLINE uint32_t SWD_Parity32(uint32_t value)
 		val |= bit << 31;         \
 	} while (0)
 
+#define SWD_FAST_READ_SAMPLE(sample) \
+	do {                            \
+		PIN_SWCLK_CLR();             \
+		PIN_DELAY_FAST();            \
+		sample = GPIOA->INDR;         \
+		PIN_SWCLK_SET();             \
+		PIN_DELAY_FAST();            \
+	} while (0)
+
+#define SWD_FAST_PACK_BARRIER() \
+	__asm__ volatile ("" : "+r"(packed) : : "memory")
+
 #define SWD_FAST_WRITE_DATA_BIT() \
 	do {                          \
 		PIN_SWDIO_OUT_SWCLK_CLR(val); \
@@ -205,6 +217,7 @@ __attribute__((section(".highcode")))
 	uint32_t bit;
 	uint32_t val;
 	uint32_t parity;
+	uint32_t packed;
 
 	uint32_t n;
 	const uint32_t swdio_cfglr_base = GPIOA->CFGLR & ~(0xFU << 28);
@@ -303,10 +316,19 @@ __attribute__((section(".highcode")))
 			val = 0U;
 			for (n = 8U; n; n--)
 			{
-				SWD_FAST_READ_DATA_BIT();
-				SWD_FAST_READ_DATA_BIT();
-				SWD_FAST_READ_DATA_BIT();
-				SWD_FAST_READ_DATA_BIT();
+				SWD_FAST_READ_SAMPLE(bit);
+				packed = (bit >> 7) & 0x01U;
+				SWD_FAST_PACK_BARRIER();
+				SWD_FAST_READ_SAMPLE(bit);
+				packed |= (bit >> 6) & 0x02U;
+				SWD_FAST_PACK_BARRIER();
+				SWD_FAST_READ_SAMPLE(bit);
+				packed |= (bit >> 5) & 0x04U;
+				SWD_FAST_PACK_BARRIER();
+				SWD_FAST_READ_SAMPLE(bit);
+				packed |= (bit >> 4) & 0x08U;
+				SWD_FAST_PACK_BARRIER();
+				val = (val >> 4) | (packed << 28);
 			}
 			parity = SWD_Parity32(val);
 			PIN_SWCLK_CLR();
@@ -422,6 +444,8 @@ __attribute__((section(".highcode")))
 }
 
 #undef SWD_FAST_READ_DATA_BIT
+#undef SWD_FAST_READ_SAMPLE
+#undef SWD_FAST_PACK_BARRIER
 #undef SWD_FAST_WRITE_DATA_BIT
 
 // SWD Transfer I/O Slow
