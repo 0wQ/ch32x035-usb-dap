@@ -58,6 +58,16 @@ uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data);
 
 #define PIN_DELAY() PIN_DELAY_SLOW(DAP_Data.clock_delay)
 
+__STATIC_FORCEINLINE uint32_t SWD_Parity32(uint32_t value)
+{
+	value ^= value >> 16;
+	value ^= value >> 8;
+	value ^= value >> 4;
+	value ^= value >> 2;
+	value ^= value >> 1;
+	return value & 1U;
+}
+
 #define SWD_FAST_READ_DATA_BIT() \
 	do {                         \
 		PIN_SWCLK_CLR();          \
@@ -65,7 +75,6 @@ uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data);
 		bit = PIN_SWDIO_IN();     \
 		PIN_SWCLK_SET();          \
 		PIN_DELAY_FAST();         \
-		parity += bit;            \
 		val >>= 1;                \
 		val |= bit << 31;         \
 	} while (0)
@@ -76,7 +85,6 @@ uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data);
 		PIN_DELAY_FAST();         \
 		PIN_SWCLK_SET();          \
 		PIN_DELAY_FAST();         \
-		parity += val;            \
 		val >>= 1;                \
 	} while (0)
 
@@ -272,7 +280,6 @@ __attribute__((section(".highcode")))
 		{
 			/* Read data */
 			val = 0U;
-			parity = 0U;
 			for (n = 8U; n; n--)
 			{
 				SWD_FAST_READ_DATA_BIT();
@@ -280,6 +287,7 @@ __attribute__((section(".highcode")))
 				SWD_FAST_READ_DATA_BIT();
 				SWD_FAST_READ_DATA_BIT();
 			}
+			parity = SWD_Parity32(val);
 			PIN_SWCLK_CLR();
 			PIN_DELAY_FAST();
 			bit = PIN_SWDIO_IN();
@@ -316,7 +324,7 @@ __attribute__((section(".highcode")))
 			GPIOA->CFGLR = swdio_cfglr_output;
 			/* Write data */
 			val = *data;
-			parity = 0U;
+			parity = SWD_Parity32(val);
 			for (n = 8U; n; n--)
 			{
 				SWD_FAST_WRITE_DATA_BIT();
