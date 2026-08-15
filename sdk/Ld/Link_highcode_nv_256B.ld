@@ -42,6 +42,9 @@ SECTIONS
         *(.highcode.*);
         *(.text.USBFS_IRQHandler);
         *(.text.DAP_ProcessCommand);
+        *(.text.chry_dap_handle);
+        *(.text.dap_out_callback);
+        *(.text.dap_in_callback);
         . = ALIGN(4);
         PROVIDE(_highcode_vma_end = .);
     } > RAM AT > FLASH
