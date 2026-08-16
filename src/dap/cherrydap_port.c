@@ -1,50 +1,6 @@
 #include "dap_main.h"
 
 #include <ch32x035.h>
-#include <string.h>
-
-#define CHERRYDAP_BOS_MAX_SIZE 64U
-
-extern struct usb_bos_descriptor bos_desc;
-
-static uint8_t bos_without_landing_page[CHERRYDAP_BOS_MAX_SIZE];
-
-static void cherrydap_disable_webusb_landing_page(void)
-{
-    static const uint8_t webusb_platform_uuid[16] = {
-        0x38, 0xB6, 0x08, 0x34, 0xA9, 0x09, 0xA0, 0x47,
-        0x8B, 0xFD, 0xA0, 0x76, 0x88, 0x15, 0xB6, 0x65,
-    };
-    const uint8_t *source = bos_desc.string;
-    uint16_t source_len = bos_desc.string_len;
-    uint16_t source_offset = 5U;
-
-    if (source == NULL || source_len < 5U || source_len > sizeof(bos_without_landing_page)) {
-        return;
-    }
-
-    memcpy(bos_without_landing_page, source, source_len);
-    while (source_offset < source_len) {
-        uint8_t capability_len = source[source_offset];
-        bool is_webusb;
-
-        if (capability_len == 0U || source_offset + capability_len > source_len) {
-            return;
-        }
-
-        is_webusb = capability_len >= 24U &&
-                    source[source_offset + 1U] == USB_DESCRIPTOR_TYPE_DEVICE_CAPABILITY &&
-                    source[source_offset + 2U] == USB_DEVICE_CAPABILITY_PLATFORM &&
-                    memcmp(&source[source_offset + 4U], webusb_platform_uuid,
-                           sizeof(webusb_platform_uuid)) == 0;
-        if (is_webusb) {
-            bos_without_landing_page[source_offset + 23U] = 0U;
-            bos_desc.string = bos_without_landing_page;
-            return;
-        }
-        source_offset += capability_len;
-    }
-}
 
 static void cherrydap_uart_apply(const struct cdc_line_coding *line_coding)
 {
@@ -81,7 +37,6 @@ void cherrydap_port_init(void)
     gpio.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(GPIOA, &gpio);
     cherrydap_uart_apply(&line_coding);
-    cherrydap_disable_webusb_landing_page();
 }
 
 void cherrydap_port_process(void)
