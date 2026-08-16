@@ -1,13 +1,14 @@
 #ifndef DAP_MAIN_H
 #define DAP_MAIN_H
 
-#include "usbd_core.h"
-#include "usbd_cdc.h"
-#include "usbd_msc.h"
-#include "usbd_hid.h"
-#include "chry_ringbuffer.h"
 #include "DAP_config.h"
-#include "DAP.h"
+
+#include <DAP.h>
+#include <chry_ringbuffer.h>
+#include <usbd_cdc.h>
+#include <usbd_core.h>
+#include <usbd_hid.h>
+#include <usbd_msc.h>
 
 #define DAP_IN_EP  0x81
 #define DAP_OUT_EP 0x02
@@ -55,8 +56,7 @@
 #endif
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 extern char serial_number_dynamic[36];
@@ -68,7 +68,7 @@ extern chry_ringbuffer_t g_usbrx;
 
 void chry_dap_init(uint8_t busid, uint32_t reg_base);
 
-void chry_dap_handle(void);
+void chry_dap_handle(void) __attribute__((section(".highcode")));
 
 void chry_dap_usb2uart_handle(void);
 

@@ -52,23 +52,23 @@ __ALIGN_BEGIN const uint8_t USBD_WinUSBDescriptorSetDescriptor[] = {
     0x00, 0x00, 0x03, 0x06, /* >= Win 8.1 */  /* dwWindowsVersion*/
     WBVAL(USBD_WINUSB_DESC_SET_LEN),          /* wDescriptorSetTotalLength */
 #if (USBD_WEBUSB_ENABLE)
-    WBVAL(WINUSB_FUNCTION_SUBSET_HEADER_SIZE), // wLength
-    WBVAL(WINUSB_SUBSET_HEADER_FUNCTION_TYPE), // wDescriptorType
-    WEBUSB_INTF_NUM,                           // bFirstInterface USBD_WINUSB_IF_NUM
-    0,                                         // bReserved
-    WBVAL(FUNCTION_SUBSET_LEN),                // wSubsetLength
-    WBVAL(WINUSB_FEATURE_COMPATIBLE_ID_SIZE),  // wLength
-    WBVAL(WINUSB_FEATURE_COMPATIBLE_ID_TYPE),  // wDescriptorType
-    'W', 'I', 'N', 'U', 'S', 'B', 0, 0,        // CompatibleId
-    0, 0, 0, 0, 0, 0, 0, 0,                    // SubCompatibleId
-    WBVAL(DEVICE_INTERFACE_GUIDS_FEATURE_LEN), // wLength
-    WBVAL(WINUSB_FEATURE_REG_PROPERTY_TYPE),   // wDescriptorType
-    WBVAL(WINUSB_PROP_DATA_TYPE_REG_MULTI_SZ), // wPropertyDataType
-    WBVAL(42),                                 // wPropertyNameLength
+    WBVAL(WINUSB_FUNCTION_SUBSET_HEADER_SIZE),  // wLength
+    WBVAL(WINUSB_SUBSET_HEADER_FUNCTION_TYPE),  // wDescriptorType
+    WEBUSB_INTF_NUM,                            // bFirstInterface USBD_WINUSB_IF_NUM
+    0,                                          // bReserved
+    WBVAL(FUNCTION_SUBSET_LEN),                 // wSubsetLength
+    WBVAL(WINUSB_FEATURE_COMPATIBLE_ID_SIZE),   // wLength
+    WBVAL(WINUSB_FEATURE_COMPATIBLE_ID_TYPE),   // wDescriptorType
+    'W', 'I', 'N', 'U', 'S', 'B', 0, 0,         // CompatibleId
+    0, 0, 0, 0, 0, 0, 0, 0,                     // SubCompatibleId
+    WBVAL(DEVICE_INTERFACE_GUIDS_FEATURE_LEN),  // wLength
+    WBVAL(WINUSB_FEATURE_REG_PROPERTY_TYPE),    // wDescriptorType
+    WBVAL(WINUSB_PROP_DATA_TYPE_REG_MULTI_SZ),  // wPropertyDataType
+    WBVAL(42),                                  // wPropertyNameLength
     'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0,
     'I', 0, 'n', 0, 't', 0, 'e', 0, 'r', 0, 'f', 0, 'a', 0, 'c', 0, 'e', 0,
     'G', 0, 'U', 0, 'I', 0, 'D', 0, 's', 0, 0, 0,
-    WBVAL(80), // wPropertyDataLength
+    WBVAL(80),  // wPropertyDataLength
     '{', 0,
     '9', 0, '2', 0, 'C', 0, 'E', 0, '6', 0, '4', 0, '6', 0, '2', 0, '-', 0,
     '9', 0, 'C', 0, '7', 0, '7', 0, '-', 0,
@@ -115,27 +115,56 @@ __ALIGN_BEGIN const uint8_t USBD_BinaryObjectStoreDescriptor[] = {
     0x10,                           /* bDescriptorType */
     USB_DEVICE_CAPABILITY_PLATFORM, /* bDevCapabilityType */
     0x00,                           /* bReserved */
-    0x38, 0xB6, 0x08, 0x34,         /* PlatformCapabilityUUID */
-    0xA9, 0x09, 0xA0, 0x47,
-    0x8B, 0xFD, 0xA0, 0x76,
-    0x88, 0x15, 0xB6, 0x65,
-    WBVAL(0x0100), /* 1.00 */ /* bcdVersion */
-    USBD_WEBUSB_VENDOR_CODE,  /* bVendorCode */
-    0,                        /* iLandingPage */
+    0x38,
+    0xB6,
+    0x08,
+    0x34, /* PlatformCapabilityUUID */
+    0xA9,
+    0x09,
+    0xA0,
+    0x47,
+    0x8B,
+    0xFD,
+    0xA0,
+    0x76,
+    0x88,
+    0x15,
+    0xB6,
+    0x65,
+    WBVAL(0x0100),
+    /* 1.00 */               /* bcdVersion */
+    USBD_WEBUSB_VENDOR_CODE, /* bVendorCode */
+    0,                       /* iLandingPage */
 #endif
 #if (USBD_WINUSB_ENABLE)
     USBD_WINUSB_DESC_LEN,           /* bLength */
     0x10,                           /* bDescriptorType */
     USB_DEVICE_CAPABILITY_PLATFORM, /* bDevCapabilityType */
     0x00,                           /* bReserved */
-    0xDF, 0x60, 0xDD, 0xD8,         /* PlatformCapabilityUUID */
-    0x89, 0x45, 0xC7, 0x4C,
-    0x9C, 0xD2, 0x65, 0x9D,
-    0x9E, 0x64, 0x8A, 0x9F,
-    0x00, 0x00, 0x03, 0x06, /* >= Win 8.1 */ /* dwWindowsVersion*/
-    WBVAL(USBD_WINUSB_DESC_SET_LEN),         /* wDescriptorSetTotalLength */
-    USBD_WINUSB_VENDOR_CODE,                 /* bVendorCode */
-    0,                                       /* bAltEnumCode */
+    0xDF,
+    0x60,
+    0xDD,
+    0xD8, /* PlatformCapabilityUUID */
+    0x89,
+    0x45,
+    0xC7,
+    0x4C,
+    0x9C,
+    0xD2,
+    0x65,
+    0x9D,
+    0x9E,
+    0x64,
+    0x8A,
+    0x9F,
+    0x00,
+    0x00,
+    0x03,
+    0x06,
+    /* >= Win 8.1 */                 /* dwWindowsVersion*/
+    WBVAL(USBD_WINUSB_DESC_SET_LEN), /* wDescriptorSetTotalLength */
+    USBD_WINUSB_VENDOR_CODE,         /* bVendorCode */
+    0,                               /* bAltEnumCode */
 #endif
 };
 
@@ -145,8 +174,7 @@ const uint8_t USBD_WebUSBURLDescriptor[URL_DESCRIPTOR_LENGTH] = {
     URL_DESCRIPTOR_LENGTH,
     WEBUSB_URL_TYPE,
     WEBUSB_URL_SCHEME_HTTPS,
-    WEBUSB_URL_STRINGS
-};
+    WEBUSB_URL_STRINGS};
 
 // clang-format off
 #define HID_DESC()                                                                                                                       \
@@ -261,10 +289,10 @@ const uint8_t hid_custom_report_desc[HID_CUSTOM_REPORT_DESC_SIZE] = {
     0xC0 /*     END_COLLECTION	             */
 };
 
-char serial_number_dynamic[36] = "00000000000000000123456789ABCDEF"; // Dynamic serial number
+char serial_number_dynamic[36] = "00000000000000000123456789ABCDEF";  // Dynamic serial number
 
 char *string_descriptors[] = {
-    (char[]){ 0x09, 0x04 },             /* Langid */
+    (char[]){0x09, 0x04},               /* Langid */
     "CherryUSB",                        /* Manufacturer */
     "CherryUSB CMSIS-DAP",              /* Product */
     "00000000000000000123456789ABCDEF", /* Serial Number */
@@ -275,32 +303,27 @@ static const uint8_t device_quality_descriptor[] = {
     USB_DEVICE_QUALIFIER_DESCRIPTOR_INIT(USB_2_1, 0x00, 0x00, 0x00, 0x01),
 };
 
-__WEAK const uint8_t *device_descriptor_callback(uint8_t speed)
-{
+__WEAK const uint8_t *device_descriptor_callback(uint8_t speed) {
     (void)speed;
     return device_descriptor;
 }
 
-__WEAK const uint8_t *config_descriptor_callback(uint8_t speed)
-{
+__WEAK const uint8_t *config_descriptor_callback(uint8_t speed) {
     (void)speed;
     return config_descriptor;
 }
 
-__WEAK const uint8_t *device_quality_descriptor_callback(uint8_t speed)
-{
+__WEAK const uint8_t *device_quality_descriptor_callback(uint8_t speed) {
     (void)speed;
     return device_quality_descriptor;
 }
 
-__WEAK const uint8_t *other_speed_config_descriptor_callback(uint8_t speed)
-{
+__WEAK const uint8_t *other_speed_config_descriptor_callback(uint8_t speed) {
     (void)speed;
     return other_speed_config_descriptor;
 }
 
-__WEAK const char *string_descriptor_callback(uint8_t speed, uint8_t index)
-{
+__WEAK const char *string_descriptor_callback(uint8_t speed, uint8_t index) {
     (void)speed;
 
     if (index == 3) {
@@ -313,21 +336,21 @@ __WEAK const char *string_descriptor_callback(uint8_t speed, uint8_t index)
     return string_descriptors[index];
 }
 
-static volatile uint16_t USB_RequestIndexI = 0; // Request  Index In
-static volatile uint16_t USB_RequestIndexO = 0; // Request  Index Out
-static volatile uint16_t USB_RequestCountI = 0; // Request  Count In
-static volatile uint16_t USB_RequestCountO = 0; // Request  Count Out
-static volatile uint8_t USB_RequestIdle = 1;    // Request  Idle  Flag
+static volatile uint16_t USB_RequestIndexI = 0;  // Request  Index In
+static volatile uint16_t USB_RequestIndexO = 0;  // Request  Index Out
+static volatile uint16_t USB_RequestCountI = 0;  // Request  Count In
+static volatile uint16_t USB_RequestCountO = 0;  // Request  Count Out
+static volatile uint8_t USB_RequestIdle = 1;     // Request  Idle  Flag
 
-static volatile uint16_t USB_ResponseIndexI = 0; // Response Index In
-static volatile uint16_t USB_ResponseIndexO = 0; // Response Index Out
-static volatile uint16_t USB_ResponseCountI = 0; // Response Count In
-static volatile uint16_t USB_ResponseCountO = 0; // Response Count Out
-static volatile uint8_t USB_ResponseIdle = 1;    // Response Idle  Flag
+static volatile uint16_t USB_ResponseIndexI = 0;  // Response Index In
+static volatile uint16_t USB_ResponseIndexO = 0;  // Response Index Out
+static volatile uint16_t USB_ResponseCountI = 0;  // Response Count In
+static volatile uint16_t USB_ResponseCountO = 0;  // Response Count Out
+static volatile uint8_t USB_ResponseIdle = 1;     // Response Idle  Flag
 
-static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Request[DAP_PACKET_COUNT][DAP_PACKET_SIZE];  // Request  Buffer
-static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Response[DAP_PACKET_COUNT][DAP_PACKET_SIZE]; // Response Buffer
-static uint16_t USB_RespSize[DAP_PACKET_COUNT];                                                        // Response Size
+static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Request[DAP_PACKET_COUNT][DAP_PACKET_SIZE];   // Request  Buffer
+static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t USB_Response[DAP_PACKET_COUNT][DAP_PACKET_SIZE];  // Response Buffer
+static uint16_t USB_RespSize[DAP_PACKET_COUNT];                                                         // Response Size
 
 USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t uartrx_ringbuffer[CONFIG_UARTRX_RINGBUF_SIZE];
 USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t usbrx_ringbuffer[CONFIG_USBRX_RINGBUF_SIZE];
@@ -343,8 +366,7 @@ static volatile uint8_t uarttx_idle_flag = 1;
 USB_NOCACHE_RAM_SECTION chry_ringbuffer_t g_uartrx;
 USB_NOCACHE_RAM_SECTION chry_ringbuffer_t g_usbrx;
 
-void usbd_event_handler(uint8_t busid, uint8_t event)
-{
+void usbd_event_handler(uint8_t busid, uint8_t event) {
     (void)busid;
     switch (event) {
         case USBD_EVENT_RESET:
@@ -377,7 +399,8 @@ void usbd_event_handler(uint8_t busid, uint8_t event)
 }
 
 void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+    __attribute__((section(".highcode")));
+void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     if (USB_Request[USB_RequestIndexI][0] == ID_DAP_TransferAbort) {
         DAP_TransferAbort = 1U;
@@ -398,7 +421,8 @@ void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
 }
 
 void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+    __attribute__((section(".highcode")));
+void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     if (USB_ResponseCountI != USB_ResponseCountO) {
         // Load data from response buffer to be sent back
@@ -413,8 +437,7 @@ void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
     }
 }
 
-void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     chry_ringbuffer_write(&g_usbrx, usb_tmpbuffer, nbytes);
     if (chry_ringbuffer_get_free(&g_usbrx) >= DAP_PACKET_SIZE) {
@@ -424,8 +447,7 @@ void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
     }
 }
 
-void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
 
     chry_ringbuffer_linear_read_done(&g_uartrx, nbytes);
@@ -439,23 +461,19 @@ void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
 
 struct usbd_endpoint dap_out_ep = {
     .ep_addr = DAP_OUT_EP,
-    .ep_cb = dap_out_callback
-};
+    .ep_cb = dap_out_callback};
 
 struct usbd_endpoint dap_in_ep = {
     .ep_addr = DAP_IN_EP,
-    .ep_cb = dap_in_callback
-};
+    .ep_cb = dap_in_callback};
 
 struct usbd_endpoint cdc_out_ep = {
     .ep_addr = CDC_OUT_EP,
-    .ep_cb = usbd_cdc_acm_bulk_out
-};
+    .ep_cb = usbd_cdc_acm_bulk_out};
 
 struct usbd_endpoint cdc_in_ep = {
     .ep_addr = CDC_IN_EP,
-    .ep_cb = usbd_cdc_acm_bulk_in
-};
+    .ep_cb = usbd_cdc_acm_bulk_in};
 
 #if CONFIG_CHERRYDAP_USE_CUSTOM_HID
 struct usbd_endpoint hid_custom_in_ep = {
@@ -488,14 +506,12 @@ struct usb_msosv2_descriptor msosv2_desc = {
 
 struct usb_bos_descriptor bos_desc = {
     .string = USBD_BinaryObjectStoreDescriptor,
-    .string_len = USBD_BOS_WTOTALLENGTH
-};
+    .string_len = USBD_BOS_WTOTALLENGTH};
 
 struct usb_webusb_descriptor webusb_url_desc = {
     .vendor_code = USBD_WEBUSB_VENDOR_CODE,
     .string = USBD_WebUSBURLDescriptor,
-    .string_len = URL_DESCRIPTOR_LENGTH
-};
+    .string_len = URL_DESCRIPTOR_LENGTH};
 
 const struct usb_descriptor cmsisdap_descriptor = {
     .device_descriptor_callback = device_descriptor_callback,
@@ -505,11 +521,9 @@ const struct usb_descriptor cmsisdap_descriptor = {
     .string_descriptor_callback = string_descriptor_callback,
     .bos_descriptor = &bos_desc,
     .msosv2_descriptor = &msosv2_desc,
-    .webusb_url_descriptor = &webusb_url_desc
-};
+    .webusb_url_descriptor = &webusb_url_desc};
 
-void chry_dap_init(uint8_t busid, uint32_t reg_base)
-{
+void chry_dap_init(uint8_t busid, uint32_t reg_base) {
     chry_ringbuffer_init(&g_uartrx, uartrx_ringbuffer, CONFIG_UARTRX_RINGBUF_SIZE);
     chry_ringbuffer_init(&g_usbrx, usbrx_ringbuffer, CONFIG_USBRX_RINGBUF_SIZE);
 
@@ -542,8 +556,7 @@ void chry_dap_init(uint8_t busid, uint32_t reg_base)
     usbd_initialize(busid, reg_base, usbd_event_handler);
 }
 
-void chry_dap_handle(void)
-{
+void chry_dap_handle(void) {
     uint32_t n;
 
     // Process pending requests
@@ -604,8 +617,7 @@ void chry_dap_handle(void)
     }
 }
 
-void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
-{
+void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) {
     (void)busid;
 
     if (memcmp((uint8_t *)&g_cdc_lincoding, line_coding, sizeof(struct cdc_line_coding)) != 0 && line_coding->dwDTERate != 0) {
@@ -615,14 +627,12 @@ void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_c
     }
 }
 
-void usbd_cdc_acm_get_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
-{
+void usbd_cdc_acm_get_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) {
     (void)busid;
     memcpy(line_coding, (uint8_t *)&g_cdc_lincoding, sizeof(struct cdc_line_coding));
 }
 
-void chry_dap_usb2uart_handle(void)
-{
+void chry_dap_usb2uart_handle(void) {
     uint32_t size;
     uint8_t *buffer;
 
@@ -638,7 +648,7 @@ void chry_dap_usb2uart_handle(void)
         usbtx_idle_flag = 1;
         uarttx_idle_flag = 1;
         config_uart_transfer = 1;
-        //chry_ringbuffer_reset_read(&g_uartrx);
+        // chry_ringbuffer_reset_read(&g_uartrx);
         /* enable irq here */
     }
 
@@ -649,7 +659,7 @@ void chry_dap_usb2uart_handle(void)
     /* why we use chry_ringbuffer_linear_read_setup?
      * becase we use dma and we do not want to use temp buffer to memcpy from ringbuffer
      *
-    */
+     */
 
     /* uartrx to usb tx */
     if (usbtx_idle_flag) {
@@ -681,21 +691,18 @@ void chry_dap_usb2uart_handle(void)
 }
 
 /* implment by user */
-__WEAK void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_coding)
-{
+__WEAK void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_coding) {
 }
 
 /* called by user */
-void chry_dap_usb2uart_uart_send_complete(uint32_t size)
-{
+void chry_dap_usb2uart_uart_send_complete(uint32_t size) {
     chry_ringbuffer_linear_read_done(&g_usbrx, size);
 
     uarttx_idle_flag = 1;
 }
 
 /* implment by user */
-__WEAK void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len)
-{
+__WEAK void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len) {
 }
 
 #if CONFIG_CHERRYDAP_USE_MSC
@@ -709,20 +716,17 @@ typedef struct
 
 BLOCK_TYPE mass_block[BLOCK_COUNT];
 
-void usbd_msc_get_cap(uint8_t lun, uint32_t *block_num, uint16_t *block_size)
-{
-    *block_num = 1000; //Pretend having so many buffer,not has actually.
+void usbd_msc_get_cap(uint8_t lun, uint32_t *block_num, uint16_t *block_size) {
+    *block_num = 1000;  // Pretend having so many buffer,not has actually.
     *block_size = BLOCK_SIZE;
 }
-int usbd_msc_sector_read(uint32_t sector, uint8_t *buffer, uint32_t length)
-{
+int usbd_msc_sector_read(uint32_t sector, uint8_t *buffer, uint32_t length) {
     if (sector < 10)
         memcpy(buffer, mass_block[sector].BlockSpace, length);
     return 0;
 }
 
-int usbd_msc_sector_write(uint32_t sector, uint8_t *buffer, uint32_t length)
-{
+int usbd_msc_sector_write(uint32_t sector, uint8_t *buffer, uint32_t length) {
     if (sector < 10)
         memcpy(mass_block[sector].BlockSpace, buffer, length);
     return 0;
