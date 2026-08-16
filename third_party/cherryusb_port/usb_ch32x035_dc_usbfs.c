@@ -445,8 +445,8 @@ static void x035_usb_complete_noncontrol_out(uint8_t busid, uint8_t ep_idx, uint
 static void x035_usb_complete_noncontrol_in(uint8_t busid, uint8_t ep_idx, uint8_t intst) {
     x035_usb_ep_state_t *state = &s_dcd.in_ep[ep_idx];
 
-    if (!state->enabled || !state->active || !x035_usb_transaction_ok(state, intst) ||
-        state->packet_len > state->remaining) {
+    /* X035 IN 完成中断不保证报告 TOG_OK */
+    if (!state->enabled || !state->active || state->packet_len > state->remaining) {
         return;
     }
 
