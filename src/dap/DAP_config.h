@@ -34,6 +34,7 @@
 #define DAP_UART_DRIVER         0
 #define DAP_UART_RX_BUFFER_SIZE 64U
 #define DAP_UART_TX_BUFFER_SIZE 64U
+#define UART_BRIDGE_MAX_BAUD    3000000U
 #define DAP_FW_VER              "0.1.0"
 
 __STATIC_INLINE uint8_t DAP_GetVendorString(char *str) {

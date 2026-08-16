@@ -10,12 +10,12 @@
 #include <usbd_hid.h>
 #include <usbd_msc.h>
 
-#define DAP_IN_EP  0x81
-#define DAP_OUT_EP 0x02
+#define DAP_IN_EP  0x85
+#define DAP_OUT_EP 0x06
 
-#define CDC_IN_EP  0x83
-#define CDC_OUT_EP 0x04
-#define CDC_INT_EP 0x85
+#define CDC_IN_EP  0x81
+#define CDC_OUT_EP 0x02
+#define CDC_INT_EP 0x83
 
 #define MSC_IN_EP  0x86
 #define MSC_OUT_EP 0x07
