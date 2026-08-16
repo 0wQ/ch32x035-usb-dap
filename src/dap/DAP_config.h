@@ -35,9 +35,6 @@
 #define DAP_UART_RX_BUFFER_SIZE 64U
 #define DAP_UART_TX_BUFFER_SIZE 64U
 #define DAP_FW_VER              "0.1.0"
-#define CONFIG_UARTRX_RINGBUF_SIZE 2048U
-#define CONFIG_USBRX_RINGBUF_SIZE  2048U
-
 __STATIC_INLINE uint8_t DAP_GetVendorString(char *str) { (void)str; return 0U; }
 __STATIC_INLINE uint8_t DAP_GetProductString(char *str) { (void)str; return 0U; }
 __STATIC_INLINE uint8_t DAP_GetSerNumString(char *str) { (void)str; return 0U; }
