@@ -1,10 +1,112 @@
 #include "dap_main.h"
 
 #include <ch32x035.h>
+#include <ch32x035_dma.h>
+
+#define CHERRYDAP_UART_RX_DMA_SIZE 2048U
+#define CHERRYDAP_UART_RX_DMA_MASK (CHERRYDAP_UART_RX_DMA_SIZE - 1U)
+
+static uint8_t cherrydap_uart_rx_dma_buffer[CHERRYDAP_UART_RX_DMA_SIZE] __attribute__((aligned(4)));
+static uint16_t cherrydap_uart_rx_dma_read;
+static volatile uint16_t cherrydap_uart_tx_dma_len;
+static volatile uint8_t cherrydap_uart_tx_dma_busy;
+static volatile uint8_t cherrydap_uart_tx_dma_complete_pending;
+
+static void cherrydap_uart_tx_dma_stop(void) {
+    USART_DMACmd(USART2, USART_DMAReq_Tx, DISABLE);
+    DMA_Cmd(DMA1_Channel7, DISABLE);
+    DMA_ClearITPendingBit(DMA1_IT_GL7);
+    cherrydap_uart_tx_dma_len = 0U;
+    cherrydap_uart_tx_dma_busy = 0U;
+    cherrydap_uart_tx_dma_complete_pending = 0U;
+}
+
+static void cherrydap_uart_rx_dma_stop(void) {
+    USART_DMACmd(USART2, USART_DMAReq_Rx, DISABLE);
+    DMA_Cmd(DMA1_Channel6, DISABLE);
+    DMA_ClearITPendingBit(DMA1_IT_GL6);
+    cherrydap_uart_rx_dma_read = 0U;
+}
+
+static void cherrydap_uart_rx_dma_start(void) {
+    DMA_InitTypeDef dma = {0};
+
+    DMA_DeInit(DMA1_Channel6);
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&USART2->DATAR;
+    dma.DMA_MemoryBaseAddr = (uint32_t)cherrydap_uart_rx_dma_buffer;
+    dma.DMA_DIR = DMA_DIR_PeripheralSRC;
+    dma.DMA_BufferSize = CHERRYDAP_UART_RX_DMA_SIZE;
+    dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode = DMA_Mode_Circular;
+    dma.DMA_Priority = DMA_Priority_VeryHigh;
+    dma.DMA_M2M = DMA_M2M_Disable;
+    DMA_Init(DMA1_Channel6, &dma);
+    DMA_Cmd(DMA1_Channel6, ENABLE);
+    USART_DMACmd(USART2, USART_DMAReq_Rx, ENABLE);
+}
+
+static void cherrydap_uart_rx_dma_drain(void) {
+    uint16_t remaining = DMA_GetCurrDataCounter(DMA1_Channel6);
+    uint16_t write = (uint16_t)(CHERRYDAP_UART_RX_DMA_SIZE - remaining) & CHERRYDAP_UART_RX_DMA_MASK;
+
+    while (cherrydap_uart_rx_dma_read != write) {
+        uint16_t len = write > cherrydap_uart_rx_dma_read
+                           ? write - cherrydap_uart_rx_dma_read
+                           : CHERRYDAP_UART_RX_DMA_SIZE - cherrydap_uart_rx_dma_read;
+        uint32_t free = chry_ringbuffer_get_free(&g_uartrx);
+
+        if (free == 0U) {
+            break;
+        }
+        if (len > free) {
+            len = (uint16_t)free;
+        }
+
+        // CDC 发送队列满时保留 DMA 读指针，等待主循环继续排空
+        len = (uint16_t)chry_ringbuffer_write(&g_uartrx, &cherrydap_uart_rx_dma_buffer[cherrydap_uart_rx_dma_read], len);
+        cherrydap_uart_rx_dma_read = (cherrydap_uart_rx_dma_read + len) & CHERRYDAP_UART_RX_DMA_MASK;
+        if (len == 0U) {
+            break;
+        }
+    }
+}
+
+static void cherrydap_uart_tx_dma_start(uint8_t *data, uint16_t len) {
+    DMA_InitTypeDef dma = {0};
+
+    if (data == NULL || len == 0U || cherrydap_uart_tx_dma_busy != 0U) {
+        return;
+    }
+
+    DMA_DeInit(DMA1_Channel7);
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&USART2->DATAR;
+    dma.DMA_MemoryBaseAddr = (uint32_t)data;
+    dma.DMA_DIR = DMA_DIR_PeripheralDST;
+    dma.DMA_BufferSize = len;
+    dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode = DMA_Mode_Normal;
+    dma.DMA_Priority = DMA_Priority_VeryHigh;
+    dma.DMA_M2M = DMA_M2M_Disable;
+    DMA_Init(DMA1_Channel7, &dma);
+    DMA_ClearITPendingBit(DMA1_IT_GL7);
+    DMA_ITConfig(DMA1_Channel7, DMA_IT_TC | DMA_IT_TE, ENABLE);
+    cherrydap_uart_tx_dma_len = len;
+    cherrydap_uart_tx_dma_busy = 1U;
+    DMA_Cmd(DMA1_Channel7, ENABLE);
+    USART_DMACmd(USART2, USART_DMAReq_Tx, ENABLE);
+}
 
 static void cherrydap_uart_apply(const struct cdc_line_coding *line_coding) {
     USART_InitTypeDef init = {0};
 
+    cherrydap_uart_tx_dma_stop();
+    cherrydap_uart_rx_dma_stop();
     init.USART_BaudRate = line_coding->dwDTERate != 0U ? line_coding->dwDTERate : 115200U;
     init.USART_WordLength = line_coding->bDataBits == 9U ? USART_WordLength_9b : USART_WordLength_8b;
     init.USART_StopBits = line_coding->bCharFormat == 2U ? USART_StopBits_2 : USART_StopBits_1;
@@ -14,10 +116,12 @@ static void cherrydap_uart_apply(const struct cdc_line_coding *line_coding) {
     init.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
     USART_Init(USART2, &init);
     USART_Cmd(USART2, ENABLE);
+    cherrydap_uart_rx_dma_start();
 }
 
 void cherrydap_port_init(void) {
     GPIO_InitTypeDef gpio = {0};
+    NVIC_InitTypeDef nvic = {0};
     struct cdc_line_coding line_coding = {
         .dwDTERate = 115200U,
         .bCharFormat = 0U,
@@ -26,6 +130,7 @@ void cherrydap_port_init(void) {
     };
 
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
     gpio.GPIO_Pin = GPIO_Pin_2;
     gpio.GPIO_Mode = GPIO_Mode_AF_PP;
@@ -34,13 +139,41 @@ void cherrydap_port_init(void) {
     gpio.GPIO_Pin = GPIO_Pin_3;
     gpio.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(GPIOA, &gpio);
+
+    nvic.NVIC_IRQChannel = DMA1_Channel7_IRQn;
+    nvic.NVIC_IRQChannelPreemptionPriority = 1U;
+    nvic.NVIC_IRQChannelSubPriority = 0U;
+    nvic.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&nvic);
     cherrydap_uart_apply(&line_coding);
 }
 
 void cherrydap_port_process(void) {
-    while (USART_GetFlagStatus(USART2, USART_FLAG_RXNE) != RESET) {
-        uint8_t byte = (uint8_t)USART_ReceiveData(USART2);
-        (void)chry_ringbuffer_write(&g_uartrx, &byte, 1U);
+    cherrydap_uart_rx_dma_drain();
+    if (cherrydap_uart_tx_dma_complete_pending != 0U) {
+        uint16_t len = cherrydap_uart_tx_dma_len;
+
+        cherrydap_uart_tx_dma_complete_pending = 0U;
+        cherrydap_uart_tx_dma_len = 0U;
+        chry_dap_usb2uart_uart_send_complete(len);
+    }
+}
+
+void DMA1_Channel7_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast"), section(".highcode"), noinline));
+void DMA1_Channel7_IRQHandler(void) {
+    uint32_t pending = DMA1->INTFR;
+
+    DMA_ClearITPendingBit(DMA1_IT_GL7);
+    if ((pending & DMA1_IT_TC7) != 0U) {
+        DMA_Cmd(DMA1_Channel7, DISABLE);
+        USART_DMACmd(USART2, USART_DMAReq_Tx, DISABLE);
+        cherrydap_uart_tx_dma_busy = 0U;
+        cherrydap_uart_tx_dma_complete_pending = 1U;
+    } else if ((pending & DMA1_IT_TE7) != 0U) {
+        DMA_Cmd(DMA1_Channel7, DISABLE);
+        USART_DMACmd(USART2, USART_DMAReq_Tx, DISABLE);
+        cherrydap_uart_tx_dma_len = 0U;
+        cherrydap_uart_tx_dma_busy = 0U;
     }
 }
 
@@ -51,10 +184,5 @@ void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_coding)
 }
 
 void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len) {
-    for (uint16_t i = 0U; i < len; ++i) {
-        while (USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET) {
-        }
-        USART_SendData(USART2, data[i]);
-    }
-    chry_dap_usb2uart_uart_send_complete(len);
+    cherrydap_uart_tx_dma_start(data, len);
 }
