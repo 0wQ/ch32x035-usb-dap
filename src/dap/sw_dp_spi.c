@@ -7,8 +7,9 @@
  */
 
 #include "DAP_config.h"
-#include "DAP.h"
-#include "ch32x035_spi.h"
+
+#include <DAP.h>
+#include <ch32x035_spi.h>
 
 #define SWD_SPI_ENABLE       0U
 #define GPIO_CFG_OUT_PP      0x1U
@@ -20,8 +21,7 @@ static uint16_t swd_spi_prescaler;
 static uint8_t swd_spi_active;
 static uint8_t swd_spi_clock_enabled;
 
-static void swd_set_gpio_clock_delay(uint32_t clock)
-{
+static void swd_set_gpio_clock_delay(uint32_t clock) {
     uint32_t delay;
 
     if (clock >= (CPU_CLOCK / (2U * IO_PORT_WRITE_CYCLES))) {
@@ -43,8 +43,7 @@ static void swd_set_gpio_clock_delay(uint32_t clock)
 
 /* Override the weak CherryDAP clock hook. SPI divisors are selected so that
  * the generated data clock never exceeds the host's requested clock. */
-void Set_Clock_Delay(uint32_t clock)
-{
+void Set_Clock_Delay(uint32_t clock) {
     if (clock >= 24000000U) {
         swd_spi_prescaler = SPI_BaudRatePrescaler_2;
         swd_spi_active = 1U;
@@ -83,13 +82,11 @@ void Set_Clock_Delay(uint32_t clock)
     }
 }
 
-uint8_t SWD_SPI_Active(void)
-{
+uint8_t SWD_SPI_Active(void) {
     return SWD_SPI_ENABLE != 0U && swd_spi_active;
 }
 
-__STATIC_FORCEINLINE void swd_gpio_delay(void)
-{
+__STATIC_FORCEINLINE void swd_gpio_delay(void) {
     if (DAP_Data.fast_clock != 0U) {
         PIN_DELAY_FAST();
     } else {
@@ -97,22 +94,19 @@ __STATIC_FORCEINLINE void swd_gpio_delay(void)
     }
 }
 
-__STATIC_FORCEINLINE void swd_gpio_clock(void)
-{
+__STATIC_FORCEINLINE void swd_gpio_clock(void) {
     PIN_SWCLK_TCK_CLR();
     swd_gpio_delay();
     PIN_SWCLK_TCK_SET();
     swd_gpio_delay();
 }
 
-__STATIC_FORCEINLINE void swd_gpio_write_bit(uint32_t bit)
-{
+__STATIC_FORCEINLINE void swd_gpio_write_bit(uint32_t bit) {
     PIN_SWDIO_OUT(bit);
     swd_gpio_clock();
 }
 
-__STATIC_FORCEINLINE uint32_t swd_gpio_read_bit(void)
-{
+__STATIC_FORCEINLINE uint32_t swd_gpio_read_bit(void) {
     uint32_t bit;
 
     PIN_SWCLK_TCK_CLR();
@@ -123,8 +117,7 @@ __STATIC_FORCEINLINE uint32_t swd_gpio_read_bit(void)
     return bit;
 }
 
-static SWD_SPI_CODE void swd_gpio_mode(uint32_t swdio_output, uint32_t swdio_level)
-{
+static SWD_SPI_CODE void swd_gpio_mode(uint32_t swdio_output, uint32_t swdio_level) {
     uint32_t config;
 
     SPI1->CTLR1 &= (uint16_t)~SPI_CTLR1_SPE;
@@ -142,8 +135,7 @@ static SWD_SPI_CODE void swd_gpio_mode(uint32_t swdio_output, uint32_t swdio_lev
     GPIOA->CFGLR = config;
 }
 
-static SWD_SPI_CODE void swd_spi_pin_mode(void)
-{
+static SWD_SPI_CODE void swd_spi_pin_mode(void) {
     uint32_t config = GPIOA->CFGLR;
 
     config &= ~((0xFU << 20) | (0xFU << 28));
@@ -151,8 +143,7 @@ static SWD_SPI_CODE void swd_spi_pin_mode(void)
     GPIOA->CFGLR = config;
 }
 
-static SWD_SPI_CODE void swd_spi_begin(uint32_t data_size)
-{
+static SWD_SPI_CODE void swd_spi_begin(uint32_t data_size) {
     if (swd_spi_clock_enabled == 0U) {
         RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
         swd_spi_clock_enabled = 1U;
@@ -168,13 +159,12 @@ static SWD_SPI_CODE void swd_spi_begin(uint32_t data_size)
     SPI1->CTLR1 |= SPI_CTLR1_SPE;
 }
 
-static SWD_SPI_CODE void swd_spi_wait_idle(void)
-{
-    while ((SPI1->STATR & SPI_STATR_BSY) != 0U) {}
+static SWD_SPI_CODE void swd_spi_wait_idle(void) {
+    while ((SPI1->STATR & SPI_STATR_BSY) != 0U) {
+    }
 }
 
-static SWD_SPI_CODE void swd_spi_tx8(uint8_t value)
-{
+static SWD_SPI_CODE void swd_spi_tx8(uint8_t value) {
     swd_spi_begin(SPI_DataSize_8b);
     SPI1->DATAR = value;
     swd_spi_wait_idle();
@@ -183,17 +173,16 @@ static SWD_SPI_CODE void swd_spi_tx8(uint8_t value)
     }
 }
 
-static SWD_SPI_CODE void swd_spi_tx32(uint32_t value)
-{
+static SWD_SPI_CODE void swd_spi_tx32(uint32_t value) {
     swd_spi_begin(SPI_DataSize_16b);
     SPI1->DATAR = (uint16_t)value;
-    while ((SPI1->STATR & SPI_STATR_TXE) == 0U) {}
+    while ((SPI1->STATR & SPI_STATR_TXE) == 0U) {
+    }
     SPI1->DATAR = (uint16_t)(value >> 16);
     swd_spi_wait_idle();
 }
 
-static SWD_SPI_CODE uint32_t swd_parity32(uint32_t value)
-{
+static SWD_SPI_CODE uint32_t swd_parity32(uint32_t value) {
     value ^= value >> 16;
     value ^= value >> 8;
     value ^= value >> 4;
@@ -202,15 +191,13 @@ static SWD_SPI_CODE uint32_t swd_parity32(uint32_t value)
     return value & 1U;
 }
 
-static SWD_SPI_CODE uint32_t swd_request_byte(uint32_t request)
-{
+static SWD_SPI_CODE uint32_t swd_request_byte(uint32_t request) {
     uint32_t header = 0x81U | ((request & 0x0FU) << 1);
 
     return header | (swd_parity32(request & 0x0FU) << 5);
 }
 
-static SWD_SPI_CODE uint32_t swd_read_ack(void)
-{
+static SWD_SPI_CODE uint32_t swd_read_ack(void) {
     uint32_t ack;
 
     for (uint32_t n = DAP_Data.swd_conf.turnaround; n != 0U; --n) {
@@ -222,8 +209,7 @@ static SWD_SPI_CODE uint32_t swd_read_ack(void)
     return ack;
 }
 
-static SWD_SPI_CODE void swd_idle_cycles(void)
-{
+static SWD_SPI_CODE void swd_idle_cycles(void) {
     uint32_t n = DAP_Data.transfer.idle_cycles;
 
     if (n != 0U) {
@@ -235,8 +221,7 @@ static SWD_SPI_CODE void swd_idle_cycles(void)
     PIN_SWDIO_TMS_SET();
 }
 
-uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data)
-{
+uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data) {
     uint32_t ack;
     uint32_t value;
 
