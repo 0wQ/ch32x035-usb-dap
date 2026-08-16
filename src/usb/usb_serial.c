@@ -1,26 +1,20 @@
 #include "usb_serial.h"
 
+#include "dap/dap_usb.h"
+
 #include <stddef.h>
 #include <string.h>
 
-#include "chry_ringbuffer.h"
-#include "dap/dap_usb.h"
-#ifndef USBFS_PORT_BENCHMARK
-#define USBFS_PORT_BENCHMARK 0
-#endif
-#if !USBFS_PORT_BENCHMARK
-#include "uart_bridge.h"
-#endif
-#include "usbd_cdc_acm.h"
-#include "usbd_core.h"
+#include <chry_ringbuffer.h>
+#include <usbd_cdc_acm.h>
+#include <usbd_core.h>
 
-#define USB_SERIAL_MPS 64u
-#define USB_SERIAL_USB_TO_UART_RING_SIZE 1024u
+#define USB_SERIAL_MPS                         64u
+#define USB_SERIAL_USB_TO_UART_RING_SIZE       1024u
 #define USB_SERIAL_PORT0_UART_TO_USB_RING_SIZE 1024u
 #define USB_SERIAL_PORT1_UART_TO_USB_RING_SIZE 4096u
-#define USB_SERIAL_ACTIVE_PORT_COUNT 1u
-#define USB_SERIAL_CONFIG_DESC_SIZE (9u + 9u + 7u + 7u + CDC_ACM_DESCRIPTOR_LEN)
-#define HIGHCODE __attribute__((section(".highcode"), noinline))
+#define USB_SERIAL_ACTIVE_PORT_COUNT           1u
+#define USB_SERIAL_CONFIG_DESC_SIZE            (9u + 9u + 7u + 7u + CDC_ACM_DESCRIPTOR_LEN)
 
 /*
  * Do not use WCH's VID for application firmware: macOS's WCH driver claims
@@ -80,9 +74,9 @@ static uint8_t s_port1_uart_to_usb_pool[USB_SERIAL_PORT1_UART_TO_USB_RING_SIZE] 
  * endpoint under sustained full-duplex traffic.
  */
 static usb_serial_port_t s_ports[USB_SERIAL_PORT_COUNT] = {
-    { .in_ep = 0x85u, .out_ep = 0x06u, .int_ep = 0x87u, .control_intf = 1u },
+    {.in_ep = 0x85u, .out_ep = 0x06u, .int_ep = 0x87u, .control_intf = 1u},
 #if USB_SERIAL_PORT_COUNT >= 2u
-    { .in_ep = 0x85u, .out_ep = 0x06u, .int_ep = 0x87u, .control_intf = 2u },
+    {.in_ep = 0x85u, .out_ep = 0x06u, .int_ep = 0x87u, .control_intf = 2u},
 #endif
 };
 
@@ -97,11 +91,10 @@ static const uint8_t s_config_descriptor[] = {
 static const uint8_t s_device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_2_0, 0xEF, 0x02, 0x01, USB_SERIAL_VID, USB_SERIAL_PID, 0x0100, 0x01),
 };
-static const char s_langid[] = { 0x09, 0x04 };
-static const char *s_strings[] = { s_langid, "WCH", "CH32X035 Multi CDC", "0001" };
+static const char s_langid[] = {0x09, 0x04};
+static const char *s_strings[] = {s_langid, "WCH", "CH32X035 Multi CDC", "0001"};
 
-static usb_serial_port_t *usb_serial_port_from_ep(uint8_t ep)
-{
+static usb_serial_port_t *usb_serial_port_from_ep(uint8_t ep) {
     for (uint8_t i = 0; i < USB_SERIAL_ACTIVE_PORT_COUNT; ++i) {
         if (s_ports[i].in_ep == ep || s_ports[i].out_ep == ep) {
             return &s_ports[i];
@@ -110,8 +103,7 @@ static usb_serial_port_t *usb_serial_port_from_ep(uint8_t ep)
     return NULL;
 }
 
-static usb_serial_port_t *usb_serial_port_from_intf(uint8_t intf)
-{
+static usb_serial_port_t *usb_serial_port_from_intf(uint8_t intf) {
     for (uint8_t i = 0; i < USB_SERIAL_ACTIVE_PORT_COUNT; ++i) {
         if (s_ports[i].control_intf == intf) {
             return &s_ports[i];
@@ -120,24 +112,7 @@ static usb_serial_port_t *usb_serial_port_from_intf(uint8_t intf)
     return NULL;
 }
 
-#if !USBFS_PORT_BENCHMARK
-static uint8_t usb_serial_port_index(const usb_serial_port_t *port)
-{
-    return (uint8_t)(port - s_ports);
-}
-#endif
-
-static void usb_serial_control_line_changed(usb_serial_port_t *port)
-{
-#if USBFS_PORT_BENCHMARK
-    (void)port;
-#else
-    uart_bridge_control_line_changed(usb_serial_port_index(port), port->dtr, port->rts);
-#endif
-}
-
-static void usb_serial_reset_port(usb_serial_port_t *port)
-{
+static void usb_serial_reset_port(usb_serial_port_t *port) {
     port->dtr = false;
     port->rts = false;
     port->out_read_armed = false;
@@ -151,18 +126,15 @@ static void usb_serial_reset_port(usb_serial_port_t *port)
     port->uart_to_usb_out = 0u;
 }
 
-static uint32_t usb_serial_uart_to_usb_used(const usb_serial_port_t *port)
-{
+static uint32_t usb_serial_uart_to_usb_used(const usb_serial_port_t *port) {
     return port->uart_to_usb_in - port->uart_to_usb_out;
 }
 
-static uint32_t usb_serial_uart_to_usb_free(const usb_serial_port_t *port)
-{
+static uint32_t usb_serial_uart_to_usb_free(const usb_serial_port_t *port) {
     return port->uart_to_usb_pool_size - usb_serial_uart_to_usb_used(port);
 }
 
-static void HIGHCODE usb_serial_start_read(usb_serial_port_t *port)
-{
+static void usb_serial_start_read(usb_serial_port_t *port) __attribute__((section(".highcode"), noinline)) {
     uint8_t idx;
 
     if (port == NULL || !port->configured || port->out_read_armed || port->out_pending_len != 0u) {
@@ -189,8 +161,7 @@ static void HIGHCODE usb_serial_start_read(usb_serial_port_t *port)
     }
 }
 
-static void HIGHCODE usb_serial_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+static void usb_serial_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode"), noinline)) {
     usb_serial_port_t *port;
 
     (void)busid;
@@ -222,8 +193,7 @@ static void HIGHCODE usb_serial_out_callback(uint8_t busid, uint8_t ep, uint32_t
     }
 }
 
-static void HIGHCODE usb_serial_start_in(usb_serial_port_t *port)
-{
+static void usb_serial_start_in(usb_serial_port_t *port) __attribute__((section(".highcode"), noinline)) {
     uint32_t in;
     uint32_t out;
     uint32_t size;
@@ -253,8 +223,7 @@ static void HIGHCODE usb_serial_start_in(usb_serial_port_t *port)
     }
 }
 
-static void HIGHCODE usb_serial_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-{
+static void usb_serial_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode"), noinline)) {
     usb_serial_port_t *port;
 
     (void)busid;
@@ -271,20 +240,17 @@ static void HIGHCODE usb_serial_in_callback(uint8_t busid, uint8_t ep, uint32_t 
     usb_serial_start_in(port);
 }
 
-static const uint8_t *usb_serial_device_descriptor(uint8_t speed)
-{
+static const uint8_t *usb_serial_device_descriptor(uint8_t speed) {
     (void)speed;
     return s_device_descriptor;
 }
 
-static const uint8_t *usb_serial_config_descriptor(uint8_t speed)
-{
+static const uint8_t *usb_serial_config_descriptor(uint8_t speed) {
     (void)speed;
     return s_config_descriptor;
 }
 
-static const char *usb_serial_string_descriptor(uint8_t speed, uint8_t index)
-{
+static const char *usb_serial_string_descriptor(uint8_t speed, uint8_t index) {
     (void)speed;
     return index < 4u ? s_strings[index] : NULL;
 }
@@ -295,8 +261,7 @@ static const struct usb_descriptor s_descriptor = {
     .string_descriptor_callback = usb_serial_string_descriptor,
 };
 
-static void usb_serial_event_handler(uint8_t busid, uint8_t event)
-{
+static void usb_serial_event_handler(uint8_t busid, uint8_t event) {
     (void)busid;
     dap_usb_event(event);
     for (uint8_t i = 0; i < USB_SERIAL_ACTIVE_PORT_COUNT; ++i) {
@@ -305,42 +270,35 @@ static void usb_serial_event_handler(uint8_t busid, uint8_t event)
         if (event == USBD_EVENT_RESET || event == USBD_EVENT_DISCONNECTED) {
             port->configured = false;
             usb_serial_reset_port(port);
-            usb_serial_control_line_changed(port);
         } else if (event == USBD_EVENT_CONFIGURED) {
             port->configured = true;
             usb_serial_reset_port(port);
-            usb_serial_control_line_changed(port);
             usb_serial_start_read(port);
         }
     }
 }
 
-void usbd_cdc_acm_set_dtr(uint8_t busid, uint8_t intf, bool dtr)
-{
+void usbd_cdc_acm_set_dtr(uint8_t busid, uint8_t intf, bool dtr) {
     usb_serial_port_t *port;
 
     (void)busid;
     port = usb_serial_port_from_intf(intf);
     if (port != NULL) {
         port->dtr = dtr;
-        usb_serial_control_line_changed(port);
     }
 }
 
-void usbd_cdc_acm_set_rts(uint8_t busid, uint8_t intf, bool rts)
-{
+void usbd_cdc_acm_set_rts(uint8_t busid, uint8_t intf, bool rts) {
     usb_serial_port_t *port;
 
     (void)busid;
     port = usb_serial_port_from_intf(intf);
     if (port != NULL) {
         port->rts = rts;
-        usb_serial_control_line_changed(port);
     }
 }
 
-void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
-{
+void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) {
     usb_serial_port_t *port;
 
     (void)busid;
@@ -352,8 +310,7 @@ void usbd_cdc_acm_set_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_c
     }
 }
 
-void usbd_cdc_acm_get_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding)
-{
+void usbd_cdc_acm_get_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_coding *line_coding) {
     usb_serial_port_t *port;
 
     (void)busid;
@@ -363,8 +320,7 @@ void usbd_cdc_acm_get_line_coding(uint8_t busid, uint8_t intf, struct cdc_line_c
     }
 }
 
-void usb_serial_init(void)
-{
+void usb_serial_init(void) {
     usbd_desc_register(0, &s_descriptor);
     dap_usb_init();
     for (uint8_t i = 0; i < USB_SERIAL_ACTIVE_PORT_COUNT; ++i) {
@@ -401,37 +357,32 @@ void usb_serial_init(void)
     usbd_initialize(0, 0, usb_serial_event_handler);
 }
 
-bool usb_serial_is_open(uint8_t port)
-{
+bool usb_serial_is_open(uint8_t port) {
     return port < USB_SERIAL_PORT_COUNT && s_ports[port].configured && s_ports[port].dtr;
 }
 
-uint16_t usb_serial_rx_available(uint8_t port)
-{
+uint16_t usb_serial_rx_available(uint8_t port) {
     if (port >= USB_SERIAL_PORT_COUNT) {
         return 0u;
     }
     return (uint16_t)chry_ringbuffer_get_used(&s_ports[port].usb_to_uart);
 }
 
-uint16_t usb_serial_tx_free(uint8_t port)
-{
+uint16_t usb_serial_tx_free(uint8_t port) {
     if (port >= USB_SERIAL_PORT_COUNT) {
         return 0u;
     }
     return (uint16_t)usb_serial_uart_to_usb_free(&s_ports[port]);
 }
 
-uint16_t usb_serial_read(uint8_t port, uint8_t *data, uint16_t len)
-{
+uint16_t usb_serial_read(uint8_t port, uint8_t *data, uint16_t len) {
     if (port >= USB_SERIAL_PORT_COUNT || data == NULL || len == 0u) {
         return 0u;
     }
     return (uint16_t)chry_ringbuffer_read(&s_ports[port].usb_to_uart, data, len);
 }
 
-uint16_t usb_serial_write(uint8_t port, const uint8_t *data, uint16_t len)
-{
+uint16_t usb_serial_write(uint8_t port, const uint8_t *data, uint16_t len) {
     if (port >= USB_SERIAL_PORT_COUNT || data == NULL || len == 0u) {
         return 0u;
     }
@@ -456,8 +407,7 @@ uint16_t usb_serial_write(uint8_t port, const uint8_t *data, uint16_t len)
     return len;
 }
 
-bool usb_serial_get_line_config(uint8_t port, usb_serial_line_config_t *config, uint32_t *version)
-{
+bool usb_serial_get_line_config(uint8_t port, usb_serial_line_config_t *config, uint32_t *version) {
     usb_serial_port_t *serial_port;
     uint32_t before;
     uint32_t after;
@@ -488,8 +438,7 @@ bool usb_serial_get_line_config(uint8_t port, usb_serial_line_config_t *config, 
     return true;
 }
 
-void HIGHCODE usb_serial_process(void)
-{
+void usb_serial_process(void) __attribute__((section(".highcode"), noinline)) {
     dap_usb_process();
     for (uint8_t i = 0; i < USB_SERIAL_ACTIVE_PORT_COUNT; ++i) {
         usb_serial_port_t *port = &s_ports[i];
