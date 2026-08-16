@@ -15,7 +15,7 @@ USB CDC 串口。
 无需额外并接 PA6。当前仅启用 ARM SWD，不启用 JTAG 和 SWO。PA4 支持
 `nRESET`，可用于 CMSIS-DAP 的 `connect-under-reset` 和显式复位命令。
 
-`src/dap/SW_DP_SPI.c` 保留 SPI1 辅助实验实现：SPI 输出 8 位 request 和
+`src/dap/sw_dp_spi.c` 保留 SPI1 辅助实验实现：SPI 输出 8 位 request 和
 32 位写数据，GPIO 完成 turnaround、ACK、读数据和 parity。SPI1 根据主机
 请求使用 187.5 kHz 至 24 MHz 的不超频分频档位；低于 187.5 kHz 时回退
 到完整 GPIO bit-bang。该路径由文件顶部的 `SWD_SPI_ENABLE` 控制，默认关闭。

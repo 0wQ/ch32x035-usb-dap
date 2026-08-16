@@ -23,7 +23,7 @@ target("firmware")
     add_files("sdk/Core/*.c", "sdk/Peripheral/src/*.c", "sdk/System/*.c")
     add_files("third_party/cherryusb/core/usbd_core.c", "third_party/cherryusb/class/cdc/usbd_cdc_acm.c", "third_party/cherryusb_port/usb_ch32x035_dc_usbfs.c")
     add_files("third_party/cherryrb/chry_ringbuffer.c")
-    add_files("src/dap/dap_main.c", "third_party/cherrydap/DAP/Source/DAP.c", "src/dap/SW_DP.c", "src/dap/SW_DP_SPI.c", "third_party/cherrydap/DAP/Source/DAP_vendor.c")
+    add_files("src/dap/dap_main.c", "third_party/cherrydap/DAP/Source/DAP.c", "src/dap/sw_dp.c", "src/dap/sw_dp_spi.c", "third_party/cherrydap/DAP/Source/DAP_vendor.c")
 
     add_includedirs("src", "src/usb", "src/dap", "sdk/Core", "sdk/Peripheral/inc", "sdk/System", "sdk/Patch")
     add_sysincludedirs("third_party/cherryusb/core", "third_party/cherryusb/common", "third_party/cherryusb/class/cdc", "third_party/cherryusb/class/msc", "third_party/cherryusb/class/hid", "third_party/cherryusb_port", "third_party/cherryrb", "third_party/cherrydap", "third_party/cherrydap/DAP/Include")
