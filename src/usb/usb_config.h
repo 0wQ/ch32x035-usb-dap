@@ -4,7 +4,7 @@
 #define CONFIG_USB_PRINTF(...) \
     do {                       \
     } while (0)
-#define CONFIG_USB_DBG_LEVEL  USB_DBG_ERROR
+#define CONFIG_USB_DBG_LEVEL USB_DBG_ERROR
 
 // 不启用数据 Cache
 // #define CONFIG_USB_DCACHE_ENABLE
