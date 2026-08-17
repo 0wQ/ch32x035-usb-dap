@@ -19,7 +19,7 @@ target("firmware")
     set_toolchains("wch-riscv")
     set_warnings("all")
 
-    add_files("src/main.c", "src/usb/bsp_usb.c", "src/dap/cherrydap_port.c", "sdk/Startup/startup_ch32x035_highcode.S")
+    add_files("src/main.c", "src/bsp/bsp_delay.c", "src/usb/bsp_usb.c", "src/dap/cherrydap_port.c", "sdk/Startup/startup_ch32x035_highcode.S")
     add_files("sdk/Core/*.c", "sdk/Peripheral/src/*.c", "sdk/System/*.c")
     add_files("third_party/cherryusb/core/usbd_core.c", "third_party/cherryusb/class/cdc/usbd_cdc_acm.c", "third_party/cherryusb_port/usb_ch32x035_dc_usbfs.c")
     add_files("third_party/cherryrb/chry_ringbuffer.c")

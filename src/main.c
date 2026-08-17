@@ -1,3 +1,4 @@
+#include "bsp/bsp_delay.h"
 #include "dap_main.h"
 
 #include <ch32x035.h>
@@ -13,6 +14,7 @@ static void __attribute__((section(".highcode"), noinline, optimize("O2"))) cher
 
 int main(void) {
     SystemInit();
+    bsp_delay_init();
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
     cherrydap_port_init();
     chry_dap_init(0u, 0u);
