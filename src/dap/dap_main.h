@@ -78,6 +78,8 @@ extern void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_
 /* implment by user */
 extern void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len);
 
+bool chry_dap_usb2uart_uart_take_next(uint32_t completed, uint8_t **data, uint16_t *len);
+
 void chry_dap_usb2uart_uart_send_complete(uint32_t size);
 
 /* implment by user */
