@@ -19,13 +19,11 @@ target("firmware")
     set_toolchains("wch-riscv")
     set_warnings("all")
 
-    add_files("src/main.c", "src/bsp/bsp_delay.c", "src/usb/bsp_usb.c", "src/dap/cherrydap_port.c", "sdk/Startup/startup_ch32x035_highcode.S")
+    add_files("src/main.c", "src/bsp/bsp_delay.c", "src/usb/bsp_usb.c", "src/wchlink/*.c", "sdk/Startup/startup_ch32x035_highcode.S")
     add_files("sdk/Core/*.c", "sdk/Peripheral/src/*.c", "sdk/System/*.c")
-    add_files("third_party/cherryusb/core/usbd_core.c", "third_party/cherryusb/class/cdc/usbd_cdc_acm.c", "third_party/cherryusb_port/usb_ch32x035_dc_usbfs.c")
+    add_files("third_party/cherryusb/core/usbd_core.c", "third_party/cherryusb_port/usb_ch32x035_dc_usbfs.c")
     add_files("third_party/cherryrb/chry_ringbuffer.c")
-    add_files("src/dap/dap_main.c", "third_party/cherrydap/DAP/Source/DAP.c", "src/dap/sw_dp.c", "src/dap/sw_dp_spi.c", "third_party/cherrydap/DAP/Source/DAP_vendor.c")
-
-    add_includedirs("src", "src/usb", "src/dap", "sdk/Core", "sdk/Peripheral/inc", "sdk/System")
+    add_includedirs("src", "src/wchlink", "src/usb", "src/dap", "sdk/Core", "sdk/Peripheral/inc", "sdk/System")
     add_sysincludedirs("third_party/cherryusb/core", "third_party/cherryusb/common", "third_party/cherryusb/class/cdc", "third_party/cherryusb/class/msc", "third_party/cherryusb/class/hid", "third_party/cherryusb_port", "third_party/cherryrb", "third_party/cherrydap", "third_party/cherrydap/DAP/Include")
 
     add_cxflags(arch_flags, "-D__PACKED=__attribute__((packed))", "-fmessage-length=0", "-fsigned-char", "-ffunction-sections", "-fdata-sections", "-fno-common", "-Wno-comment", "-Wno-unused-parameter", "-Wno-missing-prototypes", {force = true})

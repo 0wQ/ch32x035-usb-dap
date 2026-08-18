@@ -52,6 +52,7 @@ local function host_toolchain_root_candidates()
     local roots = {}
 
     if os.host() == "macosx" then
+        append_unique(roots, "/Users/sora/wch/Toolchain/RISC-V Embedded GCC12")
         append_unique(roots, "/Applications/MounRiver Studio 2.app/Contents/Resources/app/resources/darwin/components/WCH/Toolchain/RISC-V Embedded GCC12")
         append_unique(roots, "/Applications/MounRiver Studio 2.app/Contents/Resources/app/resources/darwin/components/WCH/Toolchain/RISC-V Embedded GCC")
     elseif os.host() == "windows" then
