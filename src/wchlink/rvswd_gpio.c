@@ -290,6 +290,77 @@ bool rvswd_gpio_write_memory32(uint32_t address, uint32_t value) {
     return ((abstractcs >> 8u) & 0x07u) == 0u;
 }
 
+bool rvswd_gpio_write_memory(uint32_t address, const uint8_t *data, uint32_t length) {
+    if (data == NULL || length == 0u || (address & 3u) != 0u || (length & 3u) != 0u) {
+        return false;
+    }
+
+    for (uint32_t offset = 0u; offset < length; offset += 4u) {
+        uint32_t value = ((uint32_t)data[offset + 0u]) |
+                         ((uint32_t)data[offset + 1u] << 8u) |
+                         ((uint32_t)data[offset + 2u] << 16u) |
+                         ((uint32_t)data[offset + 3u] << 24u);
+        if (!rvswd_gpio_write_memory32(address + offset, value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool rvswd_gpio_write_register(uint16_t regno, uint32_t value) {
+    uint32_t abstractcs;
+
+    if (!rvswd_gpio_write_dmi(0x04u, value) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x00231000u | (uint32_t)regno) ||
+        !rvswd_gpio_read_dmi(0x16u, &abstractcs)) {
+        return false;
+    }
+    return ((abstractcs >> 8u) & 0x07u) == 0u;
+}
+
+bool rvswd_gpio_read_register(uint16_t regno, uint32_t *value) {
+    uint32_t abstractcs;
+
+    if (value == NULL ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x00221000u | (uint32_t)regno) ||
+        !rvswd_gpio_read_dmi(0x16u, &abstractcs) ||
+        ((abstractcs >> 8u) & 0x07u) != 0u) {
+        return false;
+    }
+    return rvswd_gpio_read_dmi(0x04u, value);
+}
+
+static bool rvswd_gpio_wait_halted(void) {
+    for (uint16_t retry = 0u; retry < 1000u; ++retry) {
+        uint32_t status;
+
+        if (!rvswd_gpio_read_dmi(0x11u, &status)) {
+            return false;
+        }
+        if ((status & (1u << 9u)) != 0u) {
+            return true;
+        }
+        bsp_delay_us(100u);
+    }
+    return false;
+}
+
+bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
+                        uint32_t length, uint32_t data_address, uint32_t *result) {
+    if (!rvswd_gpio_write_register(10u, mode) ||
+        !rvswd_gpio_write_register(11u, address) ||
+        !rvswd_gpio_write_register(12u, length) ||
+        !rvswd_gpio_write_register(13u, data_address) ||
+        !rvswd_gpio_write_register(0x7b1u, entry) ||
+        !rvswd_gpio_write_dmi(0x10u, 0x40000001u) ||
+        !rvswd_gpio_wait_halted()) {
+        return false;
+    }
+    return result == NULL || rvswd_gpio_read_register(10u, result);
+}
+
 static bool rvswd_gpio_flash_wait(uint32_t mask) {
     for (uint16_t retry = 0u; retry < 5000u; ++retry) {
         uint32_t status;
