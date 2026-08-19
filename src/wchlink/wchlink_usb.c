@@ -14,11 +14,11 @@
 
 static const uint8_t wchlink_device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_1_1, 0xef, 0x02, 0x01,
-                               WCHLINK_VID, WCHLINK_PID, 0x0100, 0x01),
+                               WCHLINK_VID, WCHLINK_PID, 0x0101, 0x01),
 };
 
 static const uint8_t wchlink_config_descriptor[] = {
-    USB_CONFIG_DESCRIPTOR_INIT(48u, 1u, 0x01, USB_CONFIG_BUS_POWERED, 50u),
+    USB_CONFIG_DESCRIPTOR_INIT(46u, 1u, 0x01, USB_CONFIG_BUS_POWERED, 50u),
     USB_INTERFACE_DESCRIPTOR_INIT(0u, 0u, 4u, 0xffu, 0u, 0u, 0u),
     USB_ENDPOINT_DESCRIPTOR_INIT(0x01u, USB_ENDPOINT_TYPE_BULK, WCHLINK_MPS, 0u),
     USB_ENDPOINT_DESCRIPTOR_INIT(0x81u, USB_ENDPOINT_TYPE_BULK, WCHLINK_MPS, 0u),
@@ -129,7 +129,6 @@ static void wchlink_event_handler(uint8_t busid, uint8_t event) {
     switch (event) {
         case USBD_EVENT_RESET:
         case USBD_EVENT_DISCONNECTED:
-        case USBD_EVENT_SUSPEND:
             wchlink_configured = false;
             wchlink_request_pending = false;
             wchlink_response_pending = false;
@@ -147,6 +146,7 @@ static void wchlink_event_handler(uint8_t busid, uint8_t event) {
             wchlink_data_out_pending = false;
             wchlink_arm_request();
             break;
+        case USBD_EVENT_SUSPEND:
         case USBD_EVENT_RESUME:
             break;
         default:
@@ -246,7 +246,7 @@ void wchlink_usb_process(void) {
     __enable_irq();
 
     response_length = wchlink_protocol_process(wchlink_request, request_length,
-                                                wchlink_response, sizeof(wchlink_response));
+                                               wchlink_response, sizeof(wchlink_response));
     if (response_length == 0u) {
         response_length = 4u;
         memset(wchlink_response, 0, response_length);
