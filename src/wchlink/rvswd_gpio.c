@@ -25,6 +25,7 @@
 #define RVSWD_INTERFRAME_GUARD_US       8u
 #define RVSWD_ABSTRACT_COMMAND_DELAY_US 100u
 #define RVSWD_ABSTRACT_TIMEOUT_US       10000u
+#define RVSWD_RESUME_MIN_DELAY_US       1000u
 #define RVSWD_EXECUTE_TIMEOUT_MS        5000u
 #define RVSWD_LOADER_STACK_TOP          0x20005000u
 #define RVSWD_DEBUG_UNLOCK              0x5aa50400u
@@ -675,24 +676,27 @@ static bool rvswd_gpio_read_raw_gpr(uint8_t regno, uint32_t *value) {
     return rvswd_gpio_read_dmi(0x04u, value);
 }
 
-static bool rvswd_gpio_wait_halted(uint32_t timeout_ms) {
-    for (uint32_t elapsed = 0u; elapsed < timeout_ms * 10u; ++elapsed) {
+static bool rvswd_gpio_wait_dmstatus(uint32_t mask, bool set, uint32_t timeout_ms) {
+    uint64_t start = bsp_time_us();
+
+    do {
         uint32_t status;
 
         if (!rvswd_gpio_read_dmi(0x11u, &status)) {
             return false;
         }
-        if ((status & (1u << 9u)) != 0u) {
+        if (((status & mask) != 0u) == set) {
             return true;
         }
         bsp_delay_us(100u);
-    }
+    } while ((bsp_time_us() - start) < (uint64_t)timeout_ms * 1000u);
+
     return false;
 }
 
 bool rvswd_gpio_halt(void) {
     return rvswd_gpio_write_dmi(0x10u, 0x80000001u) &&
-           rvswd_gpio_wait_halted(100u);
+           rvswd_gpio_wait_dmstatus(1u << 9u, true, 100u);
 }
 
 bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
@@ -727,8 +731,14 @@ bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
         if (result != NULL) *result = 0xe006u;
         return false;
     }
-    bsp_delay_ms(mode == 1u ? 10u : 5000u);
-    if (!rvswd_gpio_halt()) {
+    // V30X 的 resumeack 会跨会话保持，给 resumereq 留出处理时间后直接等待 ebreak
+    bsp_delay_us(RVSWD_RESUME_MIN_DELAY_US);
+    if (!rvswd_gpio_write_dmi(0x10u, 0x00000001u)) {
+        if (result != NULL) *result = 0xe006u;
+        return false;
+    }
+    if (!rvswd_gpio_wait_dmstatus(1u << 9u, true, RVSWD_EXECUTE_TIMEOUT_MS)) {
+        (void)rvswd_gpio_halt();
         if (result != NULL) *result = 0xe007u;
         return false;
     }
