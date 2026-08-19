@@ -12,6 +12,16 @@
 #define WCHLINK_FAMILY_CONTROL 0x0du
 #define WCHLINK_FAMILY_INFO    0x11u
 #define WCHLINK_FAMILY_DMI     0x08u
+#define WCHLINK_FAMILY_CONFIG  0x06u
+
+#define WCHLINK_CONFIG_READ_PROTECTION    0x01u
+#define WCHLINK_CONFIG_DISABLE_PROTECTION 0x02u
+#define WCHLINK_CONFIG_ENABLE_PROTECTION  0x03u
+#define WCHLINK_CONFIG_WRITE_PROTECTION   0x04u
+#define WCHLINK_CONFIG_READ_PROTECTED     0x01u
+#define WCHLINK_CONFIG_READ_UNPROTECTED   0x02u
+#define WCHLINK_CONFIG_WRITE_PROTECTED    0x11u
+#define WCHLINK_CONFIG_WRITE_UNPROTECTED  0x00u
 
 #define WCHLINK_CONTROL_IDENTIFY      0x01u
 #define WCHLINK_CONTROL_CONNECT       0x02u
@@ -27,10 +37,6 @@
 #define WCHLINK_FLASH_DATA_ADDRESS   0x20001000u
 #define WCHLINK_FLASH_PACKET_SIZE    256u
 #define WCHLINK_FLASH_CHUNK_SIZE     4096u
-
-#define WCHLINK_CHIP_FAMILY_V30X 0x06u
-#define WCHLINK_CHIP_FAMILY_X035 0x0du
-#define WCHLINK_CHIP_FAMILY_L103 0x0eu
 
 static bool wchlink_connected;
 static uint32_t wchlink_read_address;
@@ -49,21 +55,6 @@ static uint8_t wchlink_data_reply_status;
 static uint8_t wchlink_loader_failure_dmi_status;
 static uint32_t wchlink_loader_failure_address;
 static uint32_t wchlink_loader_failure_abstractcs;
-
-static uint8_t wchlink_chip_family(uint32_t chip_id) {
-    switch ((chip_id >> 20u) & 0xfffu) {
-        case 0x303u:
-        case 0x305u:
-        case 0x307u:
-            return WCHLINK_CHIP_FAMILY_V30X;
-        case 0x035u:
-            return WCHLINK_CHIP_FAMILY_X035;
-        case 0x103u:
-            return WCHLINK_CHIP_FAMILY_L103;
-        default:
-            return 0u;
-    }
-}
 
 static size_t wchlink_ack(uint8_t *response, size_t capacity, uint8_t family) {
     if (capacity < 4u) {
@@ -87,6 +78,17 @@ static size_t wchlink_unsupported(uint8_t *response, size_t capacity, uint8_t fa
     return 4u;
 }
 
+static size_t wchlink_target_error(uint8_t *response, size_t capacity) {
+    if (capacity < 4u) {
+        return 0u;
+    }
+    response[0] = WCHLINK_COMMAND_PREFIX;
+    response[1] = 0x55u;
+    response[2] = 1u;
+    response[3] = (uint8_t)rvswd_gpio_flash_last_error();
+    return 4u;
+}
+
 static size_t wchlink_identity(uint8_t *response, size_t capacity) {
     if (capacity < 7u) {
         return 0u;
@@ -103,7 +105,7 @@ static size_t wchlink_identity(uint8_t *response, size_t capacity) {
 
 static size_t wchlink_connect_reply(uint8_t *response, size_t capacity, bool connected) {
     uint32_t chip_id = rvswd_gpio_target_chip_id();
-    uint8_t chip_family = wchlink_chip_family(chip_id);
+    uint8_t chip_family = rvswd_gpio_target_wchlink_family();
     bool unsupported_chip = connected && chip_family == 0u;
 
     if (unsupported_chip) {
@@ -193,6 +195,54 @@ static size_t wchlink_dmi(const uint8_t *request, uint8_t *response, size_t capa
     response[7] = (uint8_t)data;
     response[8] = success ? 0u : (rvswd_gpio_dmi_failure_retryable() ? 3u : 2u);
     return 9u;
+}
+
+static size_t wchlink_config(const uint8_t *request, size_t request_length,
+                             uint8_t *response, size_t capacity) {
+    bool protected;
+    uint8_t result;
+
+    if (request_length < 4u || capacity < 4u || !wchlink_connected) {
+        return wchlink_unsupported(response, capacity, WCHLINK_FAMILY_CONFIG);
+    }
+
+    switch (request[3]) {
+        case WCHLINK_CONFIG_READ_PROTECTION:
+            if (!rvswd_gpio_flash_read_protected(&protected)) {
+                return wchlink_target_error(response, capacity);
+            }
+            result = protected ? WCHLINK_CONFIG_READ_PROTECTED
+                               : WCHLINK_CONFIG_READ_UNPROTECTED;
+            break;
+        case WCHLINK_CONFIG_DISABLE_PROTECTION:
+        case WCHLINK_CONFIG_ENABLE_PROTECTION:
+            // 扩展帧还包含 USER 和 WRP 配置，不能按基础保护命令处理
+            if (request_length != 4u ||
+                !rvswd_gpio_flash_set_read_protected(
+                    request[3] == WCHLINK_CONFIG_ENABLE_PROTECTION)) {
+                return request_length == 4u
+                           ? wchlink_target_error(response, capacity)
+                           : wchlink_unsupported(response, capacity,
+                                                 WCHLINK_FAMILY_CONFIG);
+            }
+            result = request[3];
+            break;
+        case WCHLINK_CONFIG_WRITE_PROTECTION:
+            if (!rvswd_gpio_flash_write_protected(&protected)) {
+                return wchlink_target_error(response, capacity);
+            }
+            result = protected ? WCHLINK_CONFIG_WRITE_PROTECTED
+                               : WCHLINK_CONFIG_WRITE_UNPROTECTED;
+            break;
+        default:
+            return wchlink_unsupported(response, capacity, WCHLINK_FAMILY_CONFIG);
+    }
+
+    response[0] = WCHLINK_REPLY_PREFIX;
+    response[1] = WCHLINK_FAMILY_CONFIG;
+    response[2] = 1u;
+    response[3] = result;
+    return 4u;
 }
 
 void wchlink_protocol_reset(void) {
@@ -370,6 +420,9 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
     if (family == WCHLINK_FAMILY_DMI && request_length >= 9u) {
         return wchlink_dmi(request, response, response_capacity);
     }
+    if (family == WCHLINK_FAMILY_CONFIG) {
+        return wchlink_config(request, request_length, response, response_capacity);
+    }
     if (family == 0x01u && request_length >= 11u) {
         wchlink_write_address = ((uint32_t)request[3] << 24u) |
                                 ((uint32_t)request[4] << 16u) |
@@ -482,6 +535,10 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         return wchlink_chip_info(response, response_capacity);
     }
     if (family == WCHLINK_FAMILY_SPEED) {
+        if (request_length < 5u) {
+            return wchlink_unsupported(response, response_capacity, family);
+        }
+        rvswd_gpio_set_target_wchlink_family_hint(request[3]);
         response_length = wchlink_ack(response, response_capacity, family);
         if (response_length != 0u) {
             response[3] = 1u;
@@ -489,6 +546,10 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         return response_length;
     }
     if (family == WCHLINK_FAMILY_RESET) {
+        if (request_length >= 4u && request[3] == 0x03u && wchlink_connected &&
+            !rvswd_gpio_reset_and_halt()) {
+            return wchlink_unsupported(response, response_capacity, family);
+        }
         return wchlink_ack(response, response_capacity, family);
     }
     if (family != WCHLINK_FAMILY_CONTROL || request_length < 4u) {
