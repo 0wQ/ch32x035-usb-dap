@@ -23,6 +23,7 @@
 #define WCHLINK_FLASH_CHUNK_SIZE     4096u
 
 #define WCHLINK_CHIP_FAMILY_V30X 0x06u
+#define WCHLINK_CHIP_FAMILY_X035 0x0du
 #define WCHLINK_CHIP_FAMILY_L103 0x0eu
 
 static bool wchlink_connected;
@@ -49,6 +50,8 @@ static uint8_t wchlink_chip_family(uint32_t chip_id) {
         case 0x305u:
         case 0x307u:
             return WCHLINK_CHIP_FAMILY_V30X;
+        case 0x035u:
+            return WCHLINK_CHIP_FAMILY_X035;
         case 0x103u:
             return WCHLINK_CHIP_FAMILY_L103;
         default:

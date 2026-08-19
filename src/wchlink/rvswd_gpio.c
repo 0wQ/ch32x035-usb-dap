@@ -31,6 +31,7 @@
 #define RVSWD_DEBUG_UNLOCK              0x5aa50400u
 
 #define RVSWD_CHIP_FAMILY_MASK 0xfff00000u
+#define RVSWD_CHIP_FAMILY_X035 0x03500000u
 #define RVSWD_CHIP_FAMILY_L103 0x10300000u
 #define RVSWD_CHIP_FAMILY_V303 0x30300000u
 #define RVSWD_CHIP_FAMILY_V305 0x30500000u
@@ -146,8 +147,9 @@ static inline __attribute__((always_inline)) void rvswd_data_high(void) {
 }
 
 static void rvswd_config_data_input(void) {
-    // turnaround 期间只释放数据线，保持最后一个主机位的电平
-    GPIOA->CFGLR = (GPIOA->CFGLR & ~(0xfu << 12u)) | (0x04u << 12u);
+    // turnaround 开始前将锁存置高，释放数据线并启用内部上拉
+    GPIOA->BSHR = RVSWD_DATA_PIN;
+    GPIOA->CFGLR = (GPIOA->CFGLR & ~(0xfu << 12u)) | (0x08u << 12u);
 }
 
 static void rvswd_start(void) {
@@ -285,11 +287,12 @@ void rvswd_gpio_init(void) {
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOA;
     GPIOA->BSHR = RVSWD_PINS;
     GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 8u) | (0xfu << 12u))) |
-                   (0x01u << 8u) | (0x04u << 12u);
+                   (0x01u << 8u) | (0x08u << 12u);
 }
 
 void rvswd_gpio_disconnect(void) {
     GPIOA->BSHR = RVSWD_PINS;
+    // 会话结束后释放两根信号线，避免目标断电时通过调试引脚倒灌
     GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 8u) | (0xfu << 12u))) |
                    (0x04u << 8u) | (0x04u << 12u);
 }
@@ -787,7 +790,7 @@ static bool rvswd_gpio_flash_unlock_l103(uint32_t control) {
            rvswd_gpio_write_memory32(RVSWD_FLASH_MODEKEYR_ADDRESS, RVSWD_FLASH_KEY2);
 }
 
-static bool rvswd_gpio_flash_unlock_v30x(uint32_t control) {
+static bool rvswd_gpio_flash_unlock_main_and_fast(uint32_t control) {
     if ((control & RVSWD_FLASH_CTLR_LOCK) != 0u &&
         (!rvswd_gpio_write_memory32(RVSWD_FLASH_KEYR_ADDRESS, RVSWD_FLASH_KEY1) ||
          !rvswd_gpio_write_memory32(RVSWD_FLASH_KEYR_ADDRESS, RVSWD_FLASH_KEY2))) {
@@ -811,6 +814,7 @@ bool rvswd_gpio_flash_erase_all(void) {
 
     rvswd_flash_last_error = 0u;
     switch (chip_family) {
+        case RVSWD_CHIP_FAMILY_X035:
         case RVSWD_CHIP_FAMILY_L103:
         case RVSWD_CHIP_FAMILY_V303:
         case RVSWD_CHIP_FAMILY_V305:
@@ -834,10 +838,11 @@ bool rvswd_gpio_flash_erase_all(void) {
         case RVSWD_CHIP_FAMILY_L103:
             unlocked = rvswd_gpio_flash_unlock_l103(control);
             break;
+        case RVSWD_CHIP_FAMILY_X035:
         case RVSWD_CHIP_FAMILY_V303:
         case RVSWD_CHIP_FAMILY_V305:
         case RVSWD_CHIP_FAMILY_V307:
-            unlocked = rvswd_gpio_flash_unlock_v30x(control);
+            unlocked = rvswd_gpio_flash_unlock_main_and_fast(control);
             break;
         default:
             return false;
