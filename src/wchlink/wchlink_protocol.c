@@ -1,5 +1,7 @@
 #include "wchlink_protocol.h"
 
+#include "drv/drv_dp_pullup.h"
+#include "drv/drv_power_switch.h"
 #include "rvswd_gpio.h"
 
 #define WCHLINK_COMMAND_PREFIX 0x81u
@@ -11,11 +13,15 @@
 #define WCHLINK_FAMILY_INFO    0x11u
 #define WCHLINK_FAMILY_DMI     0x08u
 
-#define WCHLINK_CONTROL_IDENTIFY  0x01u
-#define WCHLINK_CONTROL_CONNECT   0x02u
-#define WCHLINK_CONTROL_HOLD      0x03u
-#define WCHLINK_CONTROL_RESET_LOW 0x13u
-#define WCHLINK_CONTROL_STOP      0xffu
+#define WCHLINK_CONTROL_IDENTIFY      0x01u
+#define WCHLINK_CONTROL_CONNECT       0x02u
+#define WCHLINK_CONTROL_HOLD          0x03u
+#define WCHLINK_CONTROL_POWER_3V3_ON  0x09u
+#define WCHLINK_CONTROL_POWER_3V3_OFF 0x0au
+#define WCHLINK_CONTROL_POWER_5V_ON   0x0bu
+#define WCHLINK_CONTROL_POWER_5V_OFF  0x0cu
+#define WCHLINK_CONTROL_RESET_LOW     0x13u
+#define WCHLINK_CONTROL_STOP          0xffu
 
 #define WCHLINK_FLASH_LOADER_ADDRESS 0x20000000u
 #define WCHLINK_FLASH_DATA_ADDRESS   0x20001000u
@@ -500,6 +506,19 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
             return wchlink_connect_reply(response, response_capacity, wchlink_connected);
         case WCHLINK_CONTROL_STOP:
             wchlink_protocol_reset();
+            return wchlink_ack(response, response_capacity, family);
+        case WCHLINK_CONTROL_POWER_3V3_ON:
+            drv_dp_pullup_set_enabled(true);
+            return wchlink_ack(response, response_capacity, family);
+        case WCHLINK_CONTROL_POWER_3V3_OFF:
+            drv_dp_pullup_set_enabled(false);
+            return wchlink_ack(response, response_capacity, family);
+        case WCHLINK_CONTROL_POWER_5V_ON:
+            drv_power_switch_set_enabled(true);
+            return wchlink_ack(response, response_capacity, family);
+        case WCHLINK_CONTROL_POWER_5V_OFF:
+            wchlink_protocol_reset();
+            drv_power_switch_set_enabled(false);
             return wchlink_ack(response, response_capacity, family);
         case WCHLINK_CONTROL_HOLD:
         case WCHLINK_CONTROL_RESET_LOW:
