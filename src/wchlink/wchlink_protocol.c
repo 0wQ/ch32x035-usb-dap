@@ -94,8 +94,8 @@ static size_t wchlink_identity(uint8_t *response, size_t capacity) {
     response[0] = WCHLINK_REPLY_PREFIX;
     response[1] = WCHLINK_FAMILY_CONTROL;
     response[2] = 4u;
-    response[3] = 2u;
-    response[4] = 8u;
+    response[3] = 3u;
+    response[4] = 3u;
     response[5] = 0x12u;
     response[6] = 0u;
     return 7u;
