@@ -19,6 +19,7 @@
 | [`official/`](official/) | QingKe V4 与 RISC-V Debug 规范 | V307 Debug Module、抽象命令和版本差异 |
 | [`notes/ch32v307-rvswd-mvp.md`](notes/ch32v307-rvswd-mvp.md) | 当前实现的事实、边界和排查顺序 | 避免混用 JTAG DTM、RVSWD short frame 与 WCH 私有扩展 |
 | [`notes/wch-openocd-flash-loader-transfer.md`](notes/wch-openocd-flash-loader-transfer.md) | WCH OpenOCD 的 loader 选择和下发路径 | 确认目标专用 loader 由上位机持有并通过数据端点传输 |
+| [`notes/wch-linke-option-byte-dispatch.md`](notes/wch-linke-option-byte-dispatch.md) | 原厂 Link 固件中的保护命令和 family 分派 | 约束 Flash profile 分组和 Option Bytes 实现 |
 | [`code/ch32-tapioca-probe/`](code/ch32-tapioca-probe/) | 52-bit codec、捕获夹具和 USB 协议文档 | 帧格式和 WCH-Link direct-DMI 协议的主要交叉验证 |
 | [`code/sigrok-rvswd/`](code/sigrok-rvswd/) | Sigrok RVSWD 协议解码器 | 解码 52-bit short frame 与 84-bit long frame |
 | [`code/wlink/`](code/wlink/) | `wlink` 主机的命令和 DMI 路径 | 确认当前测试工具实际发送的 USB 请求和重试行为 |
@@ -49,6 +50,7 @@
 
 ## 维护规则
 
+- 实现 WCH-Link 兼容关键功能前，先从原厂 LinkE 固件确认命令分派、寄存器顺序、等待条件和错误路径
 - 目标芯片行为优先采用 WCH QingKe V4 手册和 Debug 0.13.2
 - 52-bit 线格式优先采用真实捕获、Sigrok 解码器和 Tapioca 测试夹具的交叉结果
 - USB 兼容优先采用当前实际测试的 `wlink` 和 `minichlink -C linke` 行为
