@@ -1522,6 +1522,16 @@ bool rvswd_gpio_reset_and_halt(void) {
            rvswd_gpio_wait_dmstatus(1u << 9u, true, 100u);
 }
 
+bool rvswd_gpio_soft_reset_and_run(void) {
+    // 软复位后显式发送 resumereq，确保目标从复位向量继续运行
+    if (!rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x00000003u) ||
+        !rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x00000001u)) {
+        return false;
+    }
+    bsp_delay_us(RVSWD_RESUME_MIN_DELAY_US);
+    return rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x40000001u);
+}
+
 bool rvswd_gpio_reset_and_run(void) {
     // 不设置 haltreq，释放 ndmreset 后让目标从复位向量继续运行
     if (!rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x00000003u)) {

@@ -28,6 +28,7 @@
 #define WCHLINK_CONTROL_HOLD             0x03u
 #define WCHLINK_CONTROL_SET_CHIP_TYPE    0x04u
 #define WCHLINK_CONTROL_CLEAR_CODE_FLASH 0x08u
+#define WCHLINK_CONTROL_CLEAR_CODE_FLASH_B 0x0fu
 #define WCHLINK_CONTROL_POWER_3V3_ON     0x09u
 #define WCHLINK_CONTROL_POWER_3V3_OFF    0x0au
 #define WCHLINK_CONTROL_POWER_5V_ON      0x0bu
@@ -36,6 +37,7 @@
 #define WCHLINK_CONTROL_STOP             0xffu
 
 #define WCHLINK_RESET_MRS_RUN            0x06u
+#define WCHLINK_RESET_SOFT               0x01u
 #define WCHLINK_RESET_NORMAL             0x03u
 
 #define WCHLINK_FLASH_LOADER_ADDRESS 0x20000000u
@@ -62,6 +64,26 @@ static uint8_t wchlink_data_reply_status;
 static uint8_t wchlink_loader_failure_dmi_status;
 static uint32_t wchlink_loader_failure_address;
 static uint32_t wchlink_loader_failure_abstractcs;
+
+static void wchlink_clear_transfer_state(void) {
+    wchlink_read_address = 0u;
+    wchlink_read_remaining = 0u;
+    wchlink_read_active = false;
+    wchlink_write_address = 0u;
+    wchlink_write_remaining = 0u;
+    wchlink_write_mode = 0u;
+    wchlink_loader_received = 0u;
+    wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
+    wchlink_loader_error = 0u;
+    wchlink_flash_data_received = 0u;
+    wchlink_flash_chunk_length = 0u;
+    wchlink_loader_ready = false;
+    wchlink_data_reply_pending = false;
+    wchlink_data_reply_status = 0u;
+    wchlink_loader_failure_dmi_status = 0u;
+    wchlink_loader_failure_address = 0u;
+    wchlink_loader_failure_abstractcs = 0u;
+}
 
 static size_t wchlink_ack(uint8_t *response, size_t capacity, uint8_t family) {
     if (capacity < 4u) {
@@ -280,22 +302,7 @@ void wchlink_protocol_reset(void) {
         rvswd_gpio_disconnect();
     }
     wchlink_connected = false;
-    wchlink_read_address = 0u;
-    wchlink_read_remaining = 0u;
-    wchlink_read_active = false;
-    wchlink_write_address = 0u;
-    wchlink_write_remaining = 0u;
-    wchlink_write_mode = 0u;
-    wchlink_loader_received = 0u;
-    wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
-    wchlink_loader_error = 0u;
-    wchlink_flash_data_received = 0u;
-    wchlink_flash_chunk_length = 0u;
-    wchlink_loader_ready = false;
-    wchlink_data_reply_pending = false;
-    wchlink_loader_failure_dmi_status = 0u;
-    wchlink_loader_failure_address = 0u;
-    wchlink_loader_failure_abstractcs = 0u;
+    wchlink_clear_transfer_state();
 }
 
 bool wchlink_protocol_is_connected(void) {
@@ -469,20 +476,16 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                           ((uint32_t)request[8] << 16u) |
                           ((uint32_t)request[9] << 8u) | request[10];
 
+        wchlink_clear_transfer_state();
         wchlink_write_address = first;
         wchlink_write_remaining = second;
-        wchlink_write_mode = 0u;
-        wchlink_loader_received = 0u;
-        wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
-        wchlink_loader_error = 0u;
-        wchlink_flash_data_received = 0u;
         wchlink_flash_chunk_length = wchlink_write_remaining > WCHLINK_FLASH_CHUNK_SIZE
                                          ? WCHLINK_FLASH_CHUNK_SIZE
                                          : wchlink_write_remaining;
-        wchlink_loader_ready = false;
         return wchlink_command_reply(response, response_capacity, family, 0x01u);
     }
     if (family == 0x03u && request_length >= 11u) {
+        wchlink_clear_transfer_state();
         wchlink_read_address = ((uint32_t)request[3] << 24u) |
                                ((uint32_t)request[4] << 16u) |
                                ((uint32_t)request[5] << 8u) | request[6];
@@ -495,6 +498,7 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
     if (family == 0x02u && request_length >= 4u) {
         switch (request[3]) {
             case 0x01u:
+                wchlink_clear_transfer_state();
                 if (!wchlink_connected || !rvswd_gpio_flash_erase_all()) {
                     if (response_capacity >= 4u) {
                         response[0] = WCHLINK_COMMAND_PREFIX;
@@ -573,7 +577,7 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x08u:
-                wchlink_write_mode = 0u;
+                wchlink_clear_transfer_state();
                 return wchlink_ack(response, response_capacity, family);
             case 0x0cu:
                 wchlink_protocol_begin_data_read();
@@ -597,6 +601,14 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         return response_length;
     }
     if (family == WCHLINK_FAMILY_RESET) {
+        if (request_length >= 4u && request[3] == WCHLINK_RESET_SOFT &&
+            wchlink_connected) {
+            if (!rvswd_gpio_soft_reset_and_run()) {
+                return wchlink_unsupported(response, response_capacity, family);
+            }
+            return wchlink_command_reply(response, response_capacity, family,
+                                         request[3]);
+        }
         if (request_length >= 4u && request[3] == WCHLINK_RESET_MRS_RUN &&
             wchlink_connected) {
             if (!rvswd_gpio_reset_and_run()) {
@@ -638,6 +650,7 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
             wchlink_connected = rvswd_gpio_connect();
             return wchlink_connect_reply(response, response_capacity, wchlink_connected);
         case WCHLINK_CONTROL_CLEAR_CODE_FLASH:
+        case WCHLINK_CONTROL_CLEAR_CODE_FLASH_B:
             if (request_length < 5u) {
                 return wchlink_unsupported(response, response_capacity, family);
             }
@@ -650,10 +663,11 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
             if (!wchlink_connected || !rvswd_gpio_flash_erase_all()) {
                 return wchlink_target_error(response, response_capacity);
             }
+            wchlink_clear_transfer_state();
             response_length = wchlink_ack(response, response_capacity, family);
             if (response_length != 0u) {
-                // MRS 的 Pin RST 擦除命令要求回显子命令 0x08
-                response[3] = WCHLINK_CONTROL_CLEAR_CODE_FLASH;
+                // MRS 的全擦命令要求回显原子命令
+                response[3] = request[3];
             }
             return response_length;
         case WCHLINK_CONTROL_POWER_3V3_ON:
