@@ -62,37 +62,6 @@ typedef struct {
 
 static x035_usb_dcd_t s_dcd;
 
-#ifdef X035_USBFS_DIAGNOSTICS
-typedef struct {
-    volatile uint32_t arm_setup;
-    volatile uint32_t setup;
-    volatile uint32_t set_address;
-    volatile uint32_t ep0_write;
-    volatile uint32_t ep0_write_zero;
-    volatile uint32_t ep0_in_irq;
-    volatile uint32_t ep0_in_tog_ok;
-    volatile uint32_t ep0_in_rejected;
-    volatile uint32_t address_commit;
-    volatile uint32_t last_write_len;
-    volatile uint8_t last_setup_intst;
-    volatile uint8_t last_in_intst;
-    volatile uint8_t last_ctrl_before_in;
-    volatile uint8_t last_ctrl_after_write;
-    volatile uint16_t last_tx_len;
-    volatile uint8_t pending_address;
-    volatile uint8_t committed_address;
-    volatile uint32_t bus_reset;
-    volatile uint32_t bus_reset_with_transfer;
-    volatile uint32_t transfer_irq;
-    volatile uint32_t ignored_setup_endpoint;
-    volatile uint8_t last_reset_intflag;
-    volatile uint8_t last_reset_intst;
-    volatile uint8_t last_transfer_intst;
-} x035_usb_diag_t;
-
-volatile x035_usb_diag_t x035_usb_diag;
-#endif
-
 static bool x035_usb_bus_valid(uint8_t busid) {
     return busid == 0u;
 }
@@ -347,9 +316,6 @@ static void x035_usb_setup_dma_buffers(void) {
 }
 
 static void x035_usb_arm_setup(void) {
-#ifdef X035_USBFS_DIAGNOSTICS
-    ++x035_usb_diag.arm_setup;
-#endif
     x035_usb_reset_transfer(&s_dcd.in_ep[0]);
     x035_usb_reset_transfer(&s_dcd.out_ep[0]);
     x035_usb_restore_setup_dma();
@@ -480,19 +446,8 @@ static void x035_usb_complete_ep0_in(uint8_t busid, uint8_t intst) {
 
     (void)intst;
 
-#ifdef X035_USBFS_DIAGNOSTICS
-    ++x035_usb_diag.ep0_in_irq;
-    x035_usb_diag.last_in_intst = intst;
-    x035_usb_diag.last_ctrl_before_in = (uint8_t)USBFSD->UEP0_CTRL_H;
-    if ((intst & USBFS_UIS_TOG_OK) != 0u) {
-        ++x035_usb_diag.ep0_in_tog_ok;
-    }
-#endif
     /* X035 EP0 IN completion is valid even when TOG_OK is not reported. */
     if (!state->active || state->packet_len > state->remaining) {
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.ep0_in_rejected;
-#endif
         return;
     }
 
@@ -507,10 +462,6 @@ static void x035_usb_complete_ep0_in(uint8_t busid, uint8_t intst) {
     if (s_dcd.address_pending) {
         USBFSD->DEV_ADDR = (USBFSD->DEV_ADDR & USBFS_UDA_GP_BIT) | s_dcd.pending_address;
         s_dcd.address_pending = false;
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.address_commit;
-        x035_usb_diag.committed_address = s_dcd.pending_address;
-#endif
     }
 
     usbd_event_ep_in_complete_handler(busid, 0x80u, completed);
@@ -524,7 +475,9 @@ static void x035_usb_complete_ep0_out(uint8_t busid, uint8_t intst) {
     uint16_t packet_len = USBFSD->RX_LEN;
     uint32_t copy_len;
 
-    if (!state->active || (intst & USBFS_UIS_TOG_OK) == 0u) {
+    (void)intst;
+    /* X035 EP0 OUT 完成中断不保证报告 TOG_OK */
+    if (!state->active) {
         return;
     }
 
@@ -549,10 +502,6 @@ static void x035_usb_complete_ep0_out(uint8_t busid, uint8_t intst) {
 }
 
 static void x035_usb_handle_setup(uint8_t busid) {
-#ifdef X035_USBFS_DIAGNOSTICS
-    ++x035_usb_diag.setup;
-    x035_usb_diag.last_setup_intst = USBFSD->INT_ST;
-#endif
     x035_usb_reset_transfer(&s_dcd.in_ep[0]);
     x035_usb_reset_transfer(&s_dcd.out_ep[0]);
     s_dcd.in_ep[0].stalled = false;
@@ -647,10 +596,6 @@ int usbd_set_address(uint8_t busid, const uint8_t address) {
     } else {
         s_dcd.pending_address = address;
         s_dcd.address_pending = true;
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.set_address;
-        x035_usb_diag.pending_address = address;
-#endif
     }
     return 0;
 }
@@ -799,9 +744,16 @@ int usbd_ep_clear_stall(uint8_t busid, const uint8_t ep) {
         x035_usb_arm_setup();
     } else if (in) {
         *x035_usb_tx_len_reg(ep_idx) = 0u;
-        x035_usb_set_tx_ctrl(ep_idx, USBFS_UEP_T_RES_NAK);
+        // 清除 halt 后从 DATA0 开始新的端点会话
+        x035_usb_set_tx_ctrl(ep_idx,
+                             (x035_usb_get_tx_ctrl(ep_idx) &
+                              (uint8_t)~USBFS_UEP_T_TOG) |
+                                 USBFS_UEP_T_RES_NAK);
     } else {
-        x035_usb_set_rx_ctrl(ep_idx, USBFS_UEP_R_RES_NAK);
+        x035_usb_set_rx_ctrl(ep_idx,
+                             (x035_usb_get_rx_ctrl(ep_idx) &
+                              (uint8_t)~USBFS_UEP_R_TOG) |
+                                 USBFS_UEP_R_RES_NAK);
     }
     return 0;
 }
@@ -844,14 +796,6 @@ int usbd_ep_start_write(uint8_t busid, const uint8_t ep, const uint8_t *data, ui
     state->dma_direct = false;
 
     if (ep_idx == 0u) {
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.ep0_write;
-        x035_usb_diag.last_write_len = data_len;
-        x035_usb_diag.last_tx_len = (uint16_t)x035_usb_min(data_len, state->mps);
-        if (data_len == 0u) {
-            ++x035_usb_diag.ep0_write_zero;
-        }
-#endif
         uint32_t count = x035_usb_min(data_len, state->mps);
 
         state->packet_len = (uint16_t)count;
@@ -862,9 +806,6 @@ int usbd_ep_start_write(uint8_t busid, const uint8_t ep, const uint8_t *data, ui
         *x035_usb_tx_len_reg(0u) = (uint16_t)count;
         x035_usb_dma_fence();
         x035_usb_set_tx_ctrl(0u, (s_dcd.ep0_tx_toggle ? USBFS_UEP_T_TOG : 0u) | USBFS_UEP_T_RES_ACK);
-#ifdef X035_USBFS_DIAGNOSTICS
-        x035_usb_diag.last_ctrl_after_write = (uint8_t)USBFSD->UEP0_CTRL_H;
-#endif
         return 0;
     }
 
@@ -919,14 +860,6 @@ void USBD_IRQHandler(uint8_t busid) {
 
     intflag = USBFSD->INT_FG;
     if ((intflag & USBFS_UIF_BUS_RST) != 0u) {
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.bus_reset;
-        x035_usb_diag.last_reset_intflag = intflag;
-        x035_usb_diag.last_reset_intst = USBFSD->INT_ST;
-        if ((intflag & USBFS_UIF_TRANSFER) != 0u) {
-            ++x035_usb_diag.bus_reset_with_transfer;
-        }
-#endif
         USBFSD->INT_FG = USBFS_UIF_BUS_RST | (intflag & USBFS_UIF_TRANSFER);
         x035_usb_handle_bus_reset(busid);
         return;
@@ -936,10 +869,6 @@ void USBD_IRQHandler(uint8_t busid) {
         uint8_t intst = USBFSD->INT_ST;
         uint8_t ep_idx = intst & USBFS_UIS_ENDP_MASK;
 
-#ifdef X035_USBFS_DIAGNOSTICS
-        ++x035_usb_diag.transfer_irq;
-        x035_usb_diag.last_transfer_intst = intst;
-#endif
         switch (intst & USBFS_UIS_TOKEN_MASK) {
             case USBFS_UIS_TOKEN_SETUP:
                 /* SETUP is always handled by EP0; X035 endpoint bits may be stale here. */
