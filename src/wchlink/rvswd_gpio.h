@@ -31,3 +31,4 @@ bool rvswd_gpio_flash_write_protected(bool *protected);
 bool rvswd_gpio_flash_set_read_protected(bool protected);
 uint32_t rvswd_gpio_flash_last_error(void);
 bool rvswd_gpio_reset_and_halt(void);
+bool rvswd_gpio_reset_and_run(void);

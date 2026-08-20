@@ -35,6 +35,9 @@
 #define WCHLINK_CONTROL_RESET_LOW        0x13u
 #define WCHLINK_CONTROL_STOP             0xffu
 
+#define WCHLINK_RESET_MRS_RUN            0x06u
+#define WCHLINK_RESET_NORMAL             0x03u
+
 #define WCHLINK_FLASH_LOADER_ADDRESS 0x20000000u
 #define WCHLINK_FLASH_DATA_ADDRESS   0x20001000u
 #define WCHLINK_FLASH_PACKET_SIZE    256u
@@ -594,7 +597,16 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         return response_length;
     }
     if (family == WCHLINK_FAMILY_RESET) {
-        if (request_length >= 4u && request[3] == 0x03u && wchlink_connected &&
+        if (request_length >= 4u && request[3] == WCHLINK_RESET_MRS_RUN &&
+            wchlink_connected) {
+            if (!rvswd_gpio_reset_and_run()) {
+                return wchlink_unsupported(response, response_capacity, family);
+            }
+            return wchlink_command_reply(response, response_capacity, family,
+                                         request[3]);
+        }
+        if (request_length >= 4u && request[3] == WCHLINK_RESET_NORMAL &&
+            wchlink_connected &&
             !rvswd_gpio_reset_and_halt()) {
             return wchlink_unsupported(response, response_capacity, family);
         }

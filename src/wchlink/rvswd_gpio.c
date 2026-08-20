@@ -1522,6 +1522,15 @@ bool rvswd_gpio_reset_and_halt(void) {
            rvswd_gpio_wait_dmstatus(1u << 9u, true, 100u);
 }
 
+bool rvswd_gpio_reset_and_run(void) {
+    // 不设置 haltreq，释放 ndmreset 后让目标从复位向量继续运行
+    if (!rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x00000003u)) {
+        return false;
+    }
+    bsp_delay_us(1000u);
+    return rvswd_gpio_write_dmi(RVSWD_DMI_CONTROL, 0x00000001u);
+}
+
 bool rvswd_gpio_read_dmi(uint8_t address, uint32_t *value) {
     uint8_t frame[7] = {0};
     uint8_t target[7] = {0};
