@@ -16,6 +16,14 @@ WCH OpenOCD 的可读实现直接表明，Flash loader 由上位机持有、按�
 
 `../../.tmp/riscv-openocd-wch/src/jtag/drivers/wlinke.c:74-97` 显示，写操作将参数中的 endpoint 原样传给 libusb，读操作则将 `1`、`2` 映射为 `0x81`、`0x82`。因此 `wlink_ramcodewrite()` 中的 endpoint `2` 是 `0x02` OUT。
 
+## MRS 动态库回复
+
+官方 `libmcuupdate.dylib` 的 `McuCompiler_Download` 反汇编确认，地址、loader 准备和 loader 执行请求分别为 `81 01 08 ...`、`81 02 01 05`、`81 02 01 07`。普通编程模式的成功回复分别为 `82 01 01 01`、`82 02 01 05`、`82 02 01 02`，随后数据端点完成回复为 `41 01 xx 04`。反汇编中对首字节 `0x82` 的 `adds #0x7e` 是有符号比较形式，不能解读为 `81 7e` 特殊回复。
+
+`_ch32v307_flash_op` 的符号范围为 `0x1cac0..0x1cc7e`，有效内容长度为 `0x1be`。`McuCompiler_Download` 为该 loader 选择 `0x80` 字节分包，每包发送前先将缓冲区填充为 `0xff`，末包只复制剩余有效内容，但仍以 `0x80` 字节调用 `pWriteData`。因此 MRS 实际向 LinkE 发送 4 包共 512 字节，与 WCH OpenOCD 和 `wlink` 的传输长度一致。
+
+官方 OpenOCD WCH fork 的 `wlink_ready_write()` 会在地址帧前发送 `81 02 01 06`，当前 Rust `wlink` 的 V307 路径则明确跳过该命令，MRS 同样不发送。`0x06` 因此只能作为可选 Prepare 应答，不能用于识别上位机或分派后续状态。三种上位机都接受准备阶段回显子命令，快速编程数据端点的完成状态统一使用 `04`。
+
 ## `openocd-hacks` 来源核验
 
 `treideme/openocd-hacks` 的固定版本为 `569a2316fc5f7c22dc29ecf8c04fcaaa73bfe64a`。其历史保留了 `Import MounRiver WCH fork`、`Import MounRiver WCH fork 1.50`、`Import MounRiver WCH fork 1.60 release` 和 `Apply changes from WCH release 1.80` 四次导入记录，其中 1.60 提交明确说明源码由 MRS 邮件提供。1.80 导入提交 `fc0342607639bb120ddad507815c8d3b0123485a` 加入当前的 `wlinke.c`、`wchriscv.c`、SDI transport 和 WCH RISC-V target。

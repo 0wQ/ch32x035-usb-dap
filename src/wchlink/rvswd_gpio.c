@@ -1567,17 +1567,18 @@ static bool rvswd_gpio_identify_target(void) {
         rvswd_gpio_profile_from_wchlink_family(rvswd_expected_wchlink_family);
     uint32_t option_status;
 
+    if (rvswd_gpio_read_memory32(0x1ffff704u, &rvswd_target_chip_id) &&
+        rvswd_target_chip_id != 0u) {
+        return true;
+    }
     if (expected_profile != NULL &&
         rvswd_gpio_read_memory32(RVSWD_FLASH_OBR_ADDRESS, &option_status) &&
         (option_status & RVSWD_FLASH_OBR_READ_PROTECTED) != 0u) {
-        // 读保护会阻止 ChipID 读取，受限会话仅使用主机 SetSpeed 提示的 profile
+        // ChipID 读取失败时，受限会话使用主机 SetSpeed 提示的 profile
         rvswd_target_uses_family_hint = true;
         return true;
     }
-    if (!rvswd_gpio_read_memory32(0x1ffff704u, &rvswd_target_chip_id)) {
-        return false;
-    }
-    return rvswd_target_chip_id != 0u;
+    return false;
 }
 
 static bool rvswd_try_connect(void) {
@@ -1643,5 +1644,9 @@ void rvswd_gpio_set_target_wchlink_family_hint(uint8_t family) {
 uint8_t rvswd_gpio_target_wchlink_family(void) {
     const struct rvswd_target_profile *profile = rvswd_gpio_target_profile();
 
+    if (profile != NULL) {
+        return profile->wchlink_family;
+    }
+    profile = rvswd_gpio_profile_from_wchlink_family(rvswd_expected_wchlink_family);
     return profile == NULL ? 0u : profile->wchlink_family;
 }
