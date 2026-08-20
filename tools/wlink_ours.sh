@@ -2,7 +2,7 @@
 
 set -eu
 
-readonly project_link_serial='0000000000000001'
+readonly project_link_serial_prefix='035'
 readonly target_power_cycle_delay_seconds='0.1'
 
 for argument in "$@"; do
@@ -24,8 +24,8 @@ if ! device_list=$(wlink list); then
     exit 1
 fi
 
-device=$(printf '%s\n' "$device_list" | awk -v serial="$project_link_serial" '
-    $0 ~ ("Serial " serial "( |$)") {
+device=$(printf '%s\n' "$device_list" | awk -v prefix="$project_link_serial_prefix" '
+    $0 ~ ("Serial " prefix "[0-9A-Fa-f]{9}( |$)") {
         line = $0
         sub(/^.*<WCH-Link#/, "", line)
         sub(/[[:space:]].*$/, "", line)
@@ -37,7 +37,7 @@ device=$(printf '%s\n' "$device_list" | awk -v serial="$project_link_serial" '
 
 device_count=$(printf '%s\n' "$device" | awk 'NF { count += 1 } END { print count + 0 }')
 if [ "$device_count" -ne 1 ]; then
-    printf '%s\n' "Expected one project WCH-Link with serial $project_link_serial, found $device_count" >&2
+    printf '%s\n' "Expected one project WCH-Link with serial prefix $project_link_serial_prefix, found $device_count" >&2
     printf '%s\n' "$device_list" >&2
     exit 1
 fi

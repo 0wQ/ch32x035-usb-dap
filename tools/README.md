@@ -39,6 +39,8 @@ CH32V307 默认参数为 `--family 6 --debug-mode 1 --speed 3`。其中 `debug-m
 --clear-type N
 ```
 
+未指定 `--serial` 时默认选择序列号以 `035` 开头的本项目探针，完整序列号仍可通过 `--serial` 精确指定
+
 工具优先按 USB 序列号解析物理位置，并调用 `jtag_usb_set_location`。macOS 的
 DriverKit USB 设备可能被 Homebrew libusb 枚举不到，此时工具仅在 MRS 自身选择
 设备，多个同 VID/PID 设备同时连接时应先断开无关设备。

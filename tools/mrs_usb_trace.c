@@ -52,6 +52,13 @@ static void dump_bytes(const unsigned char *data, int length) {
 
 static void *load_libusb_symbol(const char *name) {
     static void *library;
+    void *symbol;
+
+    // 优先解析插入层之后的真实符号，避免再次解析到当前拦截函数
+    symbol = dlsym(RTLD_NEXT, name);
+    if (symbol != NULL) {
+        return symbol;
+    }
 
     if (library == NULL) {
         library =

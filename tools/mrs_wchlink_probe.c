@@ -13,6 +13,7 @@ typedef int (*get_device_version_fn)(int *, int *);
 typedef int (*set_target_chip_fn)(int, int);
 typedef int (*set_two_line_speed_fn)(int, int);
 typedef int (*set_chip_type_fn)(int, uint8_t *, bool);
+typedef int (*reset_fn)(void);
 typedef int (*download_fn)(int, int, int, const char *);
 typedef int (*flash_operation_fn)(int, int, int, int, const char *);
 typedef int (*flash_operation_ex_fn)(int, int, int, int, const char *);
@@ -34,6 +35,7 @@ struct mrs_api {
     set_target_chip_fn set_target_chip;
     set_two_line_speed_fn set_two_line_speed;
     set_chip_type_fn set_chip_type;
+    reset_fn reset;
     download_fn download;
     flash_operation_fn flash_operation;
     flash_operation_ex_fn flash_operation_ex;
@@ -52,7 +54,7 @@ static const char *default_library_path =
     "/Volumes/apfs/app/MounRiver Studio 2.app/Contents/Resources/app/resources/"
     "darwin/components/WCH/Others/CommunicationLib/default/libmcuupdate.dylib";
 static const char *default_location = NULL;
-static const char *default_serial = "0000000000000001";
+static const char *default_serial = "035";
 static const int default_family = 6;
 static const int default_speed = 3;
 static const int default_address = 0x08000000;
@@ -73,12 +75,14 @@ static void print_usage(const char *program) {
             "  %s verify --file PATH [--address N] [--library PATH]\n"
             "            [--serial SERIAL] [--location BUS-PORT] [--family N]\n"
             "            [--debug-mode N] [--speed N]\n"
+            "  %s reset [--library PATH] [--serial SERIAL] [--location BUS-PORT]\n"
+            "           [--family N] [--debug-mode N] [--speed N]\n"
             "  %s protect-enable|protect-disable [--library PATH] [--location BUS-PORT]\n"
             "            [--serial SERIAL] [--family N] [--debug-mode N] [--speed N]\n"
             "\n"
             "default serial: %s\n"
             "default flash flags: 0x06 (program + verify)\n",
-            program, program, program, program, program, program, default_serial);
+            program, program, program, program, program, program, program, default_serial);
 }
 
 static void print_symbol_error(const char *name) {
@@ -118,6 +122,7 @@ static bool load_api(struct mrs_api *api, const char *path) {
     LOAD("McuCompiler_SetTargetChip", set_target_chip)
     LOAD("McuCompiler_SetTwolineLowSpeed", set_two_line_speed)
     LOAD("McuCompiler_SetChipType", set_chip_type)
+    LOAD("McuCompiler_Reset", reset)
     LOAD("McuCompiler_Download", download)
     LOAD("MRSFunc_FlashOperation", flash_operation)
     LOAD("MRSFunc_FlashOperationExB", flash_operation_ex)
@@ -152,6 +157,17 @@ static int parse_number(const char *value, int *result) {
     return 0;
 }
 
+static bool serial_matches(const char *serial, const char *device_serial) {
+    if (serial == NULL || device_serial == NULL) {
+        return false;
+    }
+    if (strcmp(serial, "035") == 0) {
+        return strncmp(device_serial, "035", 3u) == 0 &&
+               strlen(device_serial) == 12u;
+    }
+    return strcmp(device_serial, serial) == 0;
+}
+
 static bool resolve_location(const char *serial, char *location, size_t capacity) {
     libusb_context *context = NULL;
     libusb_device **devices = NULL;
@@ -182,7 +198,8 @@ static bool resolve_location(const char *serial, char *location, size_t capacity
 
         serial_length = libusb_get_string_descriptor_ascii(
             handle, descriptor.iSerialNumber, device_serial, sizeof(device_serial));
-        if (serial_length <= 0 || strcmp((const char *)device_serial, serial) != 0) {
+        if (serial_length <= 0 ||
+            !serial_matches(serial, (const char *)device_serial)) {
             libusb_close(handle);
             continue;
         }
@@ -394,7 +411,8 @@ int main(int argc, char **argv) {
         if (strcmp(command, "verify") == 0) {
             flags = 0x02;
         }
-    } else if (strcmp(command, "erase") != 0 && strcmp(command, "check") != 0 &&
+    } else if (strcmp(command, "reset") != 0 && strcmp(command, "erase") != 0 &&
+               strcmp(command, "check") != 0 &&
                strcmp(command, "protect-enable") != 0 && strcmp(command, "protect-disable") != 0) {
         fprintf(stderr, "unknown command: %s\n", command);
         print_usage(argv[0]);
@@ -442,6 +460,15 @@ int main(int argc, char **argv) {
             if (result == 0) {
                 result = api.download(0, family, address, file_path);
                 printf("download_result=%d\n", result);
+            }
+            api.close_device();
+        } else if (strcmp(command, "reset") == 0) {
+            uint8_t subtype = 0u;
+            result = open_and_configure(&api, family, debug_mode, speed, &subtype);
+            printf("configure_result=%d subtype=0x%02x\n", result, subtype);
+            if (result == 0) {
+                result = api.reset();
+                printf("reset_result=%d\n", result);
             }
             api.close_device();
         } else if (strcmp(command, "flash") == 0) {

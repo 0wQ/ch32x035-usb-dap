@@ -18,6 +18,7 @@
 | --- | --- | --- |
 | [`official/`](official/) | QingKe V4 与 RISC-V Debug 规范 | V307 Debug Module、抽象命令和版本差异 |
 | [`notes/ch32v307-rvswd-mvp.md`](notes/ch32v307-rvswd-mvp.md) | 当前实现的事实、边界和排查顺序 | 避免混用 JTAG DTM、RVSWD short frame 与 WCH 私有扩展 |
+| [`notes/wch-link-reset-modes.md`](notes/wch-link-reset-modes.md) | WCH-Link 下载复位、全擦触发方式和 MRS 复位命令证据边界 | 区分复位后运行、硬件复位脚全擦和重新上电全擦 |
 | [`notes/wch-openocd-flash-loader-transfer.md`](notes/wch-openocd-flash-loader-transfer.md) | WCH OpenOCD 的 loader 选择和下发路径 | 确认目标专用 loader 由上位机持有并通过数据端点传输 |
 | [`notes/wch-linke-option-byte-dispatch.md`](notes/wch-linke-option-byte-dispatch.md) | 原厂 Link 固件中的保护命令和 family 分派 | 约束 Flash profile 分组和 Option Bytes 实现 |
 | [`code/ch32-tapioca-probe/`](code/ch32-tapioca-probe/) | 52-bit codec、捕获夹具和 USB 协议文档 | 帧格式和 WCH-Link direct-DMI 协议的主要交叉验证 |
