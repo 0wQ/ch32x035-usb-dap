@@ -1,0 +1,34 @@
+settings set target.language c
+
+# 所有断点都允许在 libmcuupdate 动态加载后解析，覆盖 GUI 触发的真实入口
+breakpoint set -n MRSFunc_FlashOperationExB
+breakpoint command add
+printf "\nMRS TRACE FlashOperationExB\n"
+register read x0 x1 x2 x3 x4
+memory read --format x --size 1 --count 96 $x4
+continue
+DONE
+
+breakpoint set -n MRSFunc_ClearCodeFlash
+breakpoint command add
+printf "\nMRS TRACE ClearCodeFlash\n"
+register read x0 x1 x2 x3
+continue
+DONE
+
+breakpoint set -n McuCompiler_ClearCodeFlashB
+breakpoint command add
+printf "\nMRS TRACE ClearCodeFlashB\n"
+register read x0 x1 x2 x3
+continue
+DONE
+
+breakpoint set -n pWriteData
+breakpoint command add
+printf "\nMRS TRACE pWriteData\n"
+register read x0 x1 x2 x3
+memory read --format x --size 1 --count 64 $x2
+continue
+DONE
+
+continue

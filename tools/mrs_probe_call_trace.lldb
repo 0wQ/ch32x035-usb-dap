@@ -1,0 +1,27 @@
+settings set target.language c
+
+breakpoint set -n McuCompiler_Clear
+breakpoint command add 1
+expression -- (void)printf("\\nMRS PROBE CALL McuCompiler_Clear\\n")
+continue
+DONE
+
+breakpoint set -n McuCompiler_ClearCodeFlash
+breakpoint command add 2
+expression -- (void)printf("\\nMRS PROBE CALL McuCompiler_ClearCodeFlash\\n")
+continue
+DONE
+
+breakpoint set -n McuCompiler_ClearCodeFlashB
+breakpoint command add 3
+expression -- (void)printf("\\nMRS PROBE CALL McuCompiler_ClearCodeFlashB\\n")
+continue
+DONE
+
+breakpoint set -n McuCompiler_Download
+breakpoint command add 4
+expression -- (void)printf("\\nMRS PROBE CALL McuCompiler_Download\\n")
+continue
+DONE
+
+run

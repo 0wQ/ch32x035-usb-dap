@@ -1,0 +1,10 @@
+settings set target.language c
+
+breakpoint set -s libmcuupdate.dylib -a 0x81d8
+breakpoint command add 1
+expression -- (void)printf("\\nMRS pReadData response buffer length=%d\\n", *(int *)($sp + 0x0c))
+memory read --format x --size 1 --count 32 "*(uintptr_t *)($sp + 0x18)"
+continue
+DONE
+
+run

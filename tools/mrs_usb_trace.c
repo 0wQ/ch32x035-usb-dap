@@ -1,7 +1,12 @@
 #include <stdbool.h>
-#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <unistd.h>
 
 typedef struct libusb_device_handle libusb_device_handle;
 typedef int (*libusb_bulk_transfer_fn)(libusb_device_handle *, unsigned char,
@@ -39,6 +44,16 @@ extern int libusb_control_transfer(libusb_device_handle *handle,
                                    unsigned short length,
                                    unsigned int timeout);
 
+__attribute__((constructor)) static void trace_loaded(void) {
+    char path[96];
+
+    snprintf(path, sizeof(path), "/tmp/mrs_usb_trace-%d.log", getpid());
+    // 每个被注入进程独立保存日志，避免 Electron 丢弃 helper 的标准错误
+    (void)freopen(path, "a", stderr);
+    fprintf(stderr, "USB TRACE loaded pid=%d\n", getpid());
+    fflush(stderr);
+}
+
 static void dump_bytes(const unsigned char *data, int length) {
     int limit = length < 32 ? length : 32;
 
@@ -51,25 +66,52 @@ static void dump_bytes(const unsigned char *data, int length) {
 }
 
 static void *load_libusb_symbol(const char *name) {
-    static void *library;
-    void *symbol;
+    uint32_t image_count = _dyld_image_count();
 
-    // 优先解析插入层之后的真实符号，避免再次解析到当前拦截函数
-    symbol = dlsym(RTLD_NEXT, name);
-    if (symbol != NULL) {
-        return symbol;
-    }
+    // dlsym 会再次命中 interpose，直接从 libusb 的 Mach-O 符号表取原始地址
+    for (uint32_t image_index = 0u; image_index < image_count; ++image_index) {
+        const struct mach_header *header = _dyld_get_image_header(image_index);
+        const struct load_command *command;
+        const struct symtab_command *symtab = NULL;
+        const uint8_t *cursor;
+        intptr_t slide;
 
-    if (library == NULL) {
-        library =
-            dlopen(MRS_TRACE_LIBUSB_PATH, RTLD_NOW | RTLD_LOCAL | RTLD_FIRST);
-        if (library == NULL) {
-            fprintf(stderr, "cannot open %s: %s\n", MRS_TRACE_LIBUSB_PATH,
-                    dlerror());
-            return NULL;
+        const char *image_name = _dyld_get_image_name(image_index);
+        if (header == NULL || image_name == NULL ||
+            (strcmp(image_name, MRS_TRACE_LIBUSB_PATH) != 0 &&
+             strstr(image_name, "libusb-1.0.0.dylib") == NULL)) {
+            continue;
+        }
+        command = (const struct load_command *)((const uint8_t *)header +
+                                                sizeof(struct mach_header_64));
+        for (uint32_t command_index = 0u;
+             command_index < header->ncmds; ++command_index) {
+            if (command->cmd == LC_SYMTAB) {
+                symtab = (const struct symtab_command *)command;
+                break;
+            }
+            command = (const struct load_command *)((const uint8_t *)command +
+                                                    command->cmdsize);
+        }
+        if (symtab == NULL) {
+            continue;
+        }
+        slide = _dyld_get_image_vmaddr_slide(image_index);
+        cursor = (const uint8_t *)header;
+        const struct nlist_64 *symbols =
+            (const struct nlist_64 *)(cursor + symtab->symoff);
+        const char *strings = (const char *)(cursor + symtab->stroff);
+        for (uint32_t symbol_index = 0u; symbol_index < symtab->nsyms;
+             ++symbol_index) {
+            const char *symbol_name = strings + symbols[symbol_index].n_un.n_strx;
+            if (strcmp(symbol_name, name) == 0 ||
+                (symbol_name[0] == '_' && strcmp(symbol_name + 1, name) == 0)) {
+                return (void *)(uintptr_t)(symbols[symbol_index].n_value + slide);
+            }
         }
     }
-    return dlsym(library, name);
+    fprintf(stderr, "cannot resolve real %s from libusb Mach-O symbols\n", name);
+    return NULL;
 }
 
 static int trace_libusb_bulk_transfer(libusb_device_handle *handle,

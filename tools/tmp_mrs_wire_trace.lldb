@@ -1,0 +1,106 @@
+settings set target.language c
+
+breakpoint set -n pWriteData
+breakpoint command add 1
+script print("[TRACE-WRITE]")
+register read x0 x1 x2 x3
+memory read --format x --size 1 --count 32 $x2
+continue
+DONE
+
+breakpoint set -n pReadData
+breakpoint command add 2
+script print("[TRACE-READ]")
+register read x0 x1 x2 x3
+memory read --format x --size 1 --count 32 $x2
+continue
+DONE
+
+breakpoint set -s libmcuupdate.dylib -a 0x81a4
+breakpoint command add 3
+script print("[TRACE-CONTROL-READ-DONE]")
+register read x0 x1 x2 x3
+memory read --format x --size 4 --count 1 $sp+0x0c
+memory read --format x --size 8 --count 1 $sp+0x18
+memory read --format x --size 1 --count 32 '*(unsigned long long *)($sp+0x18)'
+continue
+DONE
+
+breakpoint set -s libmcuupdate.dylib -a 0x81d0
+breakpoint command add 4
+script print("[TRACE-DATA-READ-DONE]")
+register read x0 x1 x2 x3
+memory read --format x --size 4 --count 1 $sp+0x0c
+memory read --format x --size 8 --count 1 $sp+0x18
+memory read --format x --size 1 --count 32 '*(unsigned long long *)($sp+0x18)'
+continue
+DONE
+
+breakpoint set -s libmcuupdate.dylib -a 0xebf4
+breakpoint command add 5
+script print("[TRACE-SET-CHIP-DIRECT-READ-DONE]")
+register read x0 x1 x2 x3 x29
+memory read --format x --size 4 --count 1 $sp+0x0c
+memory read --format x --size 1 --count 32 $x29-0x1c
+continue
+DONE
+
+# pWriteData 在 0x8108 保存 jtag_libusb_bulk_write 的返回值
+breakpoint set -s libmcuupdate.dylib -a 0x8108
+breakpoint command add 6
+script print("[TRACE-WRITE-DONE]")
+register read x0 x1 x2 x3
+memory read --format x --size 4 --count 1 $sp+0x0c
+continue
+DONE
+
+breakpoint set -n jtag_libusb_bulk_write
+breakpoint command add 7
+script print("[TRACE-BULK-WRITE]")
+register read x0 x1 x2 x3 x4
+memory read --format x --size 1 --count 32 $x2
+continue
+DONE
+
+breakpoint set -n jtag_libusb_bulk_read
+breakpoint command add 8
+script print("[TRACE-BULK-READ]")
+register read x0 x1 x2 x3 x4
+continue
+DONE
+
+breakpoint set -s libmcuupdate.dylib -a 0x8148
+breakpoint command add 9
+script print("[TRACE-PREAD-ENTRY-ADDRESS]")
+register read x0 x1 x2 x3
+continue
+DONE
+
+breakpoint set -n libusb_bulk_transfer
+breakpoint command add 10
+script print("[TRACE-LIBUSB-BULK]")
+register read x0 x1 x2 x3 x4 x5
+memory read --format x --size 1 --count 32 $x2
+continue
+DONE
+
+# CompareVersion 的身份 IN 事务返回点
+breakpoint set -s libmcuupdate.dylib -a 0x106b8
+breakpoint command add 11
+script print("[TRACE-COMPARE-READ-DONE]")
+register read x0 x1 x2 x3
+memory read --format x --size 4 --count 1 $sp+0x10
+memory read --format x --size 1 --count 16 $x29-0x1c
+continue
+DONE
+
+breakpoint set -s libmcuupdate.dylib -a 0xf0b4
+breakpoint command add 12
+script print("[TRACE-INFO-DIRECT-READ-DONE]")
+register read x0 x1 x2 x3 x29
+memory read --format x --size 4 --count 1 $sp+0x0c
+memory read --format x --size 1 --count 32 $x29-0x1c
+continue
+DONE
+
+run

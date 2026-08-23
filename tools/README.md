@@ -47,7 +47,7 @@ DriverKit USB 设备可能被 Homebrew libusb 枚举不到，此时工具仅在 
 
 ## MRS 调用顺序
 
-工具遵循 MRS 扩展中的实际顺序：
+`check` 命令复现 MRS 中显式调用的顺序：
 
 1. `McuCompiler_SetTargetChip(family, debug_mode)`
 2. `McuCompiler_OpenDevice()`
@@ -56,18 +56,27 @@ DriverKit USB 设备可能被 Homebrew libusb 枚举不到，此时工具仅在 
 5. `McuCompiler_SetChipType(family, subtype, false)`
 6. 调用具体的 `MRSFunc_*` 操作
 
-MRS 的 `SetChipType` 实际发送 `81 0d 01 04`，并将该命令作为首次目标连接入口。探针
-需要在回复 `82 0d` 中回显此前设置的目标 family，随后 MRS 才会继续发送擦除或编程命令。
+MRS 的 `SetChipType` 实际先发送 `81 0d 01 04`。手动检查使用 `skip=false`，随后会
+发送 `81 11 01 <family>` 查询扩展信息。官方 LinkE 连接 CH592 时，对该查询返回：
+
+```text
+82 0d 01 ff 92 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+```
+
+`MRSFunc_FlashOperationExB` 是 MRS 编程主路径，但普通目标族分支会转入
+`MRSFunc_FlashOperation`，再以 `skip=false` 调用 `McuCompiler_SetChipType`，要求
+完整 20 字节扩展信息。CH59x 必须按官方 LinkE 的专用格式回复，不能套用其他芯片族的
+4 字节拒绝帧
 
 `flash` 使用 `MRSFunc_FlashOperationExB`，默认 flags `0x06`，即编程和校验。
-`verify` 使用同一入口但只保留校验标志。需要完整擦除、编程和校验时使用
-`--flags 0x46`，再加复位并运行则使用 `--flags 0x47`。
+`verify` 使用同一入口但只保留校验标志。CH59x 工程的普通全擦、编程、校验和复位
+使用 `--flags 0x0f`。
 
 `MRSFunc_FlashOperationExB` 的 flags 定义如下：
 
 ```text
 0x80 关闭 Link 电源输出
-0x40 全擦
+0x40 掉电方式清 CodeFlash
 0x20 解除读保护
 0x10 OptEnd
 0x08 McuCompiler_Clear
@@ -75,3 +84,20 @@ MRS 的 `SetChipType` 实际发送 `81 0d 01 04`，并将该命令作为首次�
 0x02 校验
 0x01 复位并运行
 ```
+
+## 进入 CH32X035 USB ISP
+
+模拟 Link 也接受官方 LinkE 的 `81 0f 01 01` SetIAPMode 触发。该命令只负责退出
+WCH-Link 工作态，固件随后进入自身 CH32X035 的 USB ISP，后续镜像传输仍使用
+`wchisp`，不是官方 LinkE IAP 数据协议：
+
+```sh
+sh tools/wchlink_enter_iap.sh 035CDAB8706E
+```
+
+脚本会在 10 秒窗口内自动重试 `wchisp flash`，也可以把第二个参数换成指定镜像路径
+
+CDC-ACM 只保留数据回环，不触发 ISP，`WCHISP` 字节会按普通 CDC 数据原样回显
+
+该入口只影响模拟 Link 自身，不会操作 SWD 目标芯片。发送命令前应关闭 MRS、OpenOCD
+和 `wlink`，避免它们占用同一个 USB CDC 或 WCH-Link 设备

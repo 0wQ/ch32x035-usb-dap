@@ -1,0 +1,24 @@
+settings set target.language c
+
+breakpoint set -n pReadData
+breakpoint command add 1
+expression -- (void)printf("\\nMRS pReadData endpoint=%d buffer=%p length=%d\\n", (int)$x1, (void *)$x2, *(int *)$x3)
+bt
+continue
+DONE
+
+breakpoint set -n jtag_libusb_bulk_read
+breakpoint command add 2
+expression -- (void)printf("\\nMRS BULK READ entry ep=0x%02x buffer=%p length=%d timeout=%d\\n", (unsigned)$x1, (void *)$x2, (int)$x3, (int)$x4)
+continue
+DONE
+
+# jtag_libusb_bulk_read 在内部 libusb_bulk_transfer 返回后保存实际长度的位置
+breakpoint set -s libmcuupdate.dylib -a 0x456c
+breakpoint command add 3
+expression -- (void)printf("\\nMRS BULK READ done transferred=%d buffer=%p\\n", *(int *)($sp + 0x0c), (void *)*(uintptr_t *)($sp + 0x18))
+memory read --format x --size 1 --count 32 "*(uintptr_t *)($sp + 0x18)"
+continue
+DONE
+
+run

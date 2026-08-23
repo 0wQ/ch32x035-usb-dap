@@ -1,0 +1,11 @@
+settings set target.language c
+
+breakpoint set -n pReadData
+breakpoint command add 1
+expression -- uintptr_t $mrs_response_buffer = $x2
+breakpoint set --address $x30
+breakpoint command add 2 -o 'expression -- (void)printf("\\nMRS pReadData response buffer\\n")' -o 'memory read --format x --size 1 --count 32 $mrs_response_buffer' -o continue
+continue
+DONE
+
+run
