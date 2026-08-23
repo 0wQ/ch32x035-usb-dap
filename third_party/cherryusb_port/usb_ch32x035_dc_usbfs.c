@@ -13,6 +13,8 @@
 #include <ch32x035_usb.h>
 #include <usbd_core.h>
 
+#include "usb_ch32x035_dc_usbfs.h"
+
 #ifdef CONFIG_USB_HS
 #error "CH32X035 only provides a USB full-speed device controller"
 #endif
@@ -42,6 +44,7 @@ typedef struct {
     bool stalled;
     bool active;
     bool dma_direct;
+    bool accept_toggle_mismatch;
     uint8_t *buffer;
     uint32_t remaining;
     uint32_t transferred;
@@ -163,18 +166,36 @@ X035_ALWAYS_INLINE uint8_t x035_usb_get_rx_ctrl(uint8_t ep_idx) {
     return (uint8_t)(*x035_usb_ctrl_reg(ep_idx) & X035_USB_RX_CTRL_MASK);
 }
 
+X035_ALWAYS_INLINE uint32_t x035_usb_irq_save(void) {
+    uint32_t state;
+    uint32_t mask = 0x88u;
+
+    __asm__ volatile("csrrc %0, 0x800, %1" : "=r"(state) : "r"(mask) : "memory");
+    __asm__ volatile("fence.i" ::: "memory");
+    return state & mask;
+}
+
+X035_ALWAYS_INLINE void x035_usb_irq_restore(uint32_t state) {
+    __asm__ volatile("csrs 0x800, %0" : : "r"(state) : "memory");
+}
+
 X035_ALWAYS_INLINE void x035_usb_set_tx_ctrl(uint8_t ep_idx, uint8_t value) {
     volatile uint16_t *ctrl = x035_usb_ctrl_reg(ep_idx);
+    uint32_t irq_state = x035_usb_irq_save();
     uint16_t current = *ctrl;
 
+    // IN 和 OUT 控制位共享同一寄存器，原子更新避免主循环与 USB 中断互相覆盖 toggle
     *ctrl = (current & (uint16_t)~X035_USB_TX_CTRL_MASK) | (value & X035_USB_TX_CTRL_MASK);
+    x035_usb_irq_restore(irq_state);
 }
 
 X035_ALWAYS_INLINE void x035_usb_set_rx_ctrl(uint8_t ep_idx, uint8_t value) {
     volatile uint16_t *ctrl = x035_usb_ctrl_reg(ep_idx);
+    uint32_t irq_state = x035_usb_irq_save();
     uint16_t current = *ctrl;
 
     *ctrl = (current & (uint16_t)~X035_USB_RX_CTRL_MASK) | (value & X035_USB_RX_CTRL_MASK);
+    x035_usb_irq_restore(irq_state);
 }
 
 X035_ALWAYS_INLINE void x035_usb_dma_fence(void) {
@@ -370,15 +391,22 @@ static void x035_usb_complete_noncontrol_out(uint8_t busid, uint8_t ep_idx, uint
     uint16_t packet_len = USBFSD->RX_LEN;
     uint32_t copy_len;
     bool complete;
+    bool toggle_mismatch;
 
-    if (!state->enabled || !state->active || !x035_usb_transaction_ok(state, intst)) {
+    if (!state->enabled || !state->active) {
+        return;
+    }
+    toggle_mismatch = !x035_usb_transaction_ok(state, intst) &&
+                      state->accept_toggle_mismatch;
+    if (!x035_usb_transaction_ok(state, intst) && !toggle_mismatch) {
         return;
     }
 
     x035_usb_set_rx_response(ep_idx, USBFS_UEP_R_RES_NAK);
-    if (state->type != USB_ENDPOINT_TYPE_ISOCHRONOUS) {
+    if (state->type != USB_ENDPOINT_TYPE_ISOCHRONOUS && !toggle_mismatch) {
         x035_usb_set_rx_ctrl(ep_idx, x035_usb_get_rx_ctrl(ep_idx) ^ USBFS_UEP_R_TOG);
     }
+    state->accept_toggle_mismatch = false;
 
     if (packet_len > state->mps) {
         packet_len = state->mps;
@@ -698,6 +726,71 @@ int usbd_ep_close(uint8_t busid, const uint8_t ep) {
         x035_usb_restore_dma(ep_idx);
     }
     return 0;
+}
+
+int ch32x035_usbd_ep_abort_in(uint8_t busid, uint8_t ep) {
+    uint8_t ep_idx = USB_EP_GET_IDX(ep);
+    x035_usb_ep_state_t *state;
+
+    if (!x035_usb_bus_valid(busid) || !USB_EP_DIR_IS_IN(ep) || (ep & 0x70u) != 0u ||
+        ep_idx == 0u || !x035_usb_ep_valid(ep_idx)) {
+        return -USB_ERR_INVAL;
+    }
+
+    state = &s_dcd.in_ep[ep_idx];
+    if (!state->enabled || state->stalled) {
+        return -USB_ERR_NOTCONN;
+    }
+
+    // 新命令到达时废弃旧回复，保持 toggle 让下一包沿用当前 Bulk 会话
+    x035_usb_reset_transfer(state);
+    *x035_usb_tx_len_reg(ep_idx) = 0u;
+    x035_usb_set_tx_response(ep_idx, USBFS_UEP_T_RES_NAK);
+    return 0;
+}
+
+void ch32x035_usbd_set_ep_in_toggle(uint8_t busid, uint8_t ep, bool toggle) {
+    uint8_t ep_idx = USB_EP_GET_IDX(ep);
+
+    if (!x035_usb_bus_valid(busid) || !USB_EP_DIR_IS_IN(ep) || (ep & 0x70u) != 0u ||
+        ep_idx == 0u || !x035_usb_ep_valid(ep_idx)) {
+        return;
+    }
+    x035_usb_set_tx_ctrl(ep_idx,
+                         (x035_usb_get_tx_ctrl(ep_idx) & (uint8_t)~USBFS_UEP_T_TOG) |
+                             (toggle ? USBFS_UEP_T_TOG : 0u));
+}
+
+void ch32x035_usbd_toggle_ep_in_toggle(uint8_t busid, uint8_t ep) {
+    uint8_t ep_idx = USB_EP_GET_IDX(ep);
+
+    if (!x035_usb_bus_valid(busid) || !USB_EP_DIR_IS_IN(ep) || (ep & 0x70u) != 0u ||
+        ep_idx == 0u || !x035_usb_ep_valid(ep_idx)) {
+        return;
+    }
+    x035_usb_set_tx_ctrl(ep_idx, x035_usb_get_tx_ctrl(ep_idx) ^ USBFS_UEP_T_TOG);
+}
+
+void ch32x035_usbd_set_ep_out_toggle(uint8_t busid, uint8_t ep, bool toggle) {
+    uint8_t ep_idx = USB_EP_GET_IDX(ep);
+
+    if (!x035_usb_bus_valid(busid) || !USB_EP_DIR_IS_OUT(ep) || (ep & 0x70u) != 0u ||
+        ep_idx == 0u || !x035_usb_ep_valid(ep_idx)) {
+        return;
+    }
+    x035_usb_set_rx_ctrl(ep_idx,
+                         (x035_usb_get_rx_ctrl(ep_idx) & (uint8_t)~USBFS_UEP_R_TOG) |
+                             (toggle ? USBFS_UEP_R_TOG : 0u));
+}
+
+void ch32x035_usbd_set_ep_out_toggle_resync(uint8_t busid, uint8_t ep, bool enable) {
+    uint8_t ep_idx = USB_EP_GET_IDX(ep);
+
+    if (!x035_usb_bus_valid(busid) || !USB_EP_DIR_IS_OUT(ep) || (ep & 0x70u) != 0u ||
+        ep_idx == 0u || !x035_usb_ep_valid(ep_idx)) {
+        return;
+    }
+    s_dcd.out_ep[ep_idx].accept_toggle_mismatch = enable;
 }
 
 int usbd_ep_set_stall(uint8_t busid, const uint8_t ep) {

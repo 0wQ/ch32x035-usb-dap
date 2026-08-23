@@ -1,5 +1,8 @@
 #include "wchlink_protocol.h"
 
+#include <string.h>
+
+#include "bsp/bsp_delay.h"
 #include "drv/drv_dp_pullup.h"
 #include "drv/drv_power_switch.h"
 #include "rvswd_gpio.h"
@@ -10,9 +13,13 @@
 #define WCHLINK_FAMILY_RESET   0x0bu
 #define WCHLINK_FAMILY_SPEED   0x0cu
 #define WCHLINK_FAMILY_CONTROL 0x0du
+#define WCHLINK_TARGET_FAMILY_CH59X 0x0bu
+#define WCHLINK_TARGET_FAMILY_CH58X 0x07u
+#define WCHLINK_TARGET_FAMILY_L103 0x0eu
 #define WCHLINK_FAMILY_INFO    0x11u
 #define WCHLINK_FAMILY_DMI     0x08u
 #define WCHLINK_FAMILY_CONFIG  0x06u
+#define WCHLINK_FAMILY_DEVICE_MODE 0x0fu
 
 #define WCHLINK_CONFIG_READ_PROTECTION    0x01u
 #define WCHLINK_CONFIG_DISABLE_PROTECTION 0x02u
@@ -40,13 +47,39 @@
 #define WCHLINK_RESET_SOFT               0x01u
 #define WCHLINK_RESET_NORMAL             0x03u
 
-#define WCHLINK_FLASH_LOADER_ADDRESS 0x20000000u
-#define WCHLINK_FLASH_DATA_ADDRESS   0x20001000u
+#define WCHLINK_DEVICE_MODE_IAP         0x01u
+#define WCHLINK_DEVICE_MODE_QUERY       0x02u
+
+
 #define WCHLINK_FLASH_PACKET_SIZE    256u
 #define WCHLINK_FLASH_CHUNK_SIZE     4096u
 #define WCHLINK_LOADER_DEFAULT_SIZE  512u
+#define WCHLINK_CH5XX_LOADER_MAX_SIZE 2048u
+#define WCHLINK_CH5XX_LOADER_PAGE_SIZE 256u
+#define WCHLINK_CH5XX_LOADER_CHECKSUM_ADDRESS 0x20006010u
+#define WCHLINK_L103_LOADER_CHECKSUM_ADDRESS 0x20002010u
+
+struct wchlink_loader_layout {
+    uint32_t entry;
+    uint32_t data;
+    uint32_t stack_top;
+};
+
+static const struct wchlink_loader_layout wchlink_loader_layout_default = {
+    .entry = 0x20000000u,
+    .data = 0x20001000u,
+    .stack_top = 0x20005000u,
+};
+
+static const struct wchlink_loader_layout wchlink_loader_layout_ch59x = {
+    .entry = 0x20004000u,
+    .data = 0x20005000u,
+    .stack_top = 0x20007000u,
+};
 
 static bool wchlink_connected;
+static bool wchlink_ch5xx_info_query_seen;
+static bool wchlink_isp_request_pending;
 static uint32_t wchlink_read_address;
 static uint32_t wchlink_read_remaining;
 static bool wchlink_read_active;
@@ -55,15 +88,40 @@ static uint32_t wchlink_write_remaining;
 static uint8_t wchlink_write_mode;
 static uint32_t wchlink_loader_received;
 static uint32_t wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
+static bool wchlink_loader_variable_length;
 static uint8_t wchlink_loader_error;
 static uint32_t wchlink_flash_data_received;
 static uint32_t wchlink_flash_chunk_length;
+static uint32_t wchlink_flash_loader_mode;
+static uint32_t wchlink_flash_checksum;
 static bool wchlink_loader_ready;
 static bool wchlink_data_reply_pending;
 static uint8_t wchlink_data_reply_status;
 static uint8_t wchlink_loader_failure_dmi_status;
 static uint32_t wchlink_loader_failure_address;
 static uint32_t wchlink_loader_failure_abstractcs;
+static uint8_t wchlink_flash_padding[WCHLINK_FLASH_PACKET_SIZE];
+
+static uint32_t wchlink_checksum_add(uint32_t checksum, const uint8_t *data,
+                                     size_t length) {
+    for (size_t offset = 0u; offset < length; offset += 4u) {
+        checksum += (uint32_t)data[offset + 0u] |
+                    ((uint32_t)data[offset + 1u] << 8u) |
+                    ((uint32_t)data[offset + 2u] << 16u) |
+                    ((uint32_t)data[offset + 3u] << 24u);
+    }
+    return checksum;
+}
+
+static bool wchlink_target_uses_ch5xx_loader(void) {
+    uint8_t family = rvswd_gpio_target_wchlink_family();
+    return family == WCHLINK_TARGET_FAMILY_CH58X ||
+           family == WCHLINK_TARGET_FAMILY_CH59X;
+}
+
+static bool wchlink_target_uses_l103_loader(void) {
+    return rvswd_gpio_target_wchlink_family() == WCHLINK_TARGET_FAMILY_L103;
+}
 
 static void wchlink_clear_transfer_state(void) {
     wchlink_read_address = 0u;
@@ -74,15 +132,25 @@ static void wchlink_clear_transfer_state(void) {
     wchlink_write_mode = 0u;
     wchlink_loader_received = 0u;
     wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
+    wchlink_loader_variable_length = false;
     wchlink_loader_error = 0u;
     wchlink_flash_data_received = 0u;
     wchlink_flash_chunk_length = 0u;
+    wchlink_flash_loader_mode = 0u;
+    wchlink_flash_checksum = 0u;
     wchlink_loader_ready = false;
     wchlink_data_reply_pending = false;
     wchlink_data_reply_status = 0u;
     wchlink_loader_failure_dmi_status = 0u;
     wchlink_loader_failure_address = 0u;
     wchlink_loader_failure_abstractcs = 0u;
+}
+
+static const struct wchlink_loader_layout *wchlink_target_loader_layout(void) {
+    if (wchlink_target_uses_ch5xx_loader()) {
+        return &wchlink_loader_layout_ch59x;
+    }
+    return &wchlink_loader_layout_default;
 }
 
 static size_t wchlink_ack(uint8_t *response, size_t capacity, uint8_t family) {
@@ -137,6 +205,7 @@ static size_t wchlink_identity(uint8_t *response, size_t capacity) {
     response[0] = WCHLINK_REPLY_PREFIX;
     response[1] = WCHLINK_FAMILY_CONTROL;
     response[2] = 4u;
+    // 官方 LinkE 与 MRS 版本检查使用 3.3 身份，CH592 不改变 Link 固件版本
     response[3] = 3u;
     response[4] = 3u;
     response[5] = 0x12u;
@@ -185,6 +254,17 @@ static size_t wchlink_chip_info(uint8_t *response, size_t capacity) {
 
     if (capacity < 20u) {
         return 0u;
+    }
+
+    if (wchlink_target_uses_ch5xx_loader()) {
+        // MRS 的 CH5xx FlashOperation 路径固定读取 20 字节，LinkE 将 ChipID 放在第 4 字节
+        memset(response, 0, 20u);
+        response[0] = WCHLINK_REPLY_PREFIX;
+        response[1] = WCHLINK_FAMILY_CONTROL;
+        response[2] = 1u;
+        response[3] = 0xffu;
+        response[4] = (uint8_t)(chip_id >> 24u);
+        return 20u;
     }
 
     if (!rvswd_gpio_read_memory32(0x1ffff7e0u, &flash_size) ||
@@ -260,6 +340,11 @@ static size_t wchlink_config(const uint8_t *request, size_t request_length,
 
     switch (request[3]) {
         case WCHLINK_CONFIG_READ_PROTECTION:
+            if (wchlink_target_uses_ch5xx_loader()) {
+                // CH5xx 不使用 CH32 Option Byte，LinkE 将保护查询报告为未保护
+                result = WCHLINK_CONFIG_READ_UNPROTECTED;
+                break;
+            }
             if (!rvswd_gpio_flash_read_protected(&protected)) {
                 return wchlink_target_error(response, capacity);
             }
@@ -302,7 +387,16 @@ void wchlink_protocol_reset(void) {
         rvswd_gpio_disconnect();
     }
     wchlink_connected = false;
+    wchlink_ch5xx_info_query_seen = false;
+    wchlink_isp_request_pending = false;
     wchlink_clear_transfer_state();
+}
+
+bool wchlink_protocol_take_isp_request(void) {
+    bool pending = wchlink_isp_request_pending;
+
+    wchlink_isp_request_pending = false;
+    return pending;
 }
 
 bool wchlink_protocol_is_connected(void) {
@@ -324,21 +418,24 @@ bool wchlink_protocol_data_write_active(void) {
 }
 
 void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
+    const struct wchlink_loader_layout *layout;
+
     if (data == NULL || length == 0u || wchlink_write_mode == 0u) {
         return;
     }
 
     if (wchlink_write_mode == 1u) {
+        layout = wchlink_target_loader_layout();
         if (wchlink_loader_error == 0u) {
             if (length > WCHLINK_FLASH_PACKET_SIZE ||
-                wchlink_loader_received + length > wchlink_loader_expected) {
+                length > wchlink_loader_expected - wchlink_loader_received) {
                 // 长度错误属于 USB 会话状态异常，不读取陈旧的 RVSWD 诊断信息
                 wchlink_loader_error = 0xefu;
                 wchlink_loader_failure_address =
-                    WCHLINK_FLASH_LOADER_ADDRESS + wchlink_loader_received;
+                    layout->entry + wchlink_loader_received;
                 wchlink_loader_failure_abstractcs = 0xffffffffu;
             } else if (!rvswd_gpio_write_memory(
-                           WCHLINK_FLASH_LOADER_ADDRESS + wchlink_loader_received,
+                           layout->entry + wchlink_loader_received,
                            data, (uint32_t)length)) {
                 wchlink_loader_error = rvswd_gpio_memory_last_error();
                 wchlink_loader_failure_dmi_status =
@@ -353,15 +450,19 @@ void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
             }
         }
 
-        // 错误后继续收完当前 loader，避免 USB 主机永久等待未重挂载的端点
-        if (wchlink_loader_received + length >= wchlink_loader_expected) {
+        // CH59x loader 的实际长度随上位机实现变化，结束标志是后续的 0x07 命令
+        if (!wchlink_loader_variable_length &&
+            wchlink_loader_received + length >= wchlink_loader_expected) {
             wchlink_loader_received = wchlink_loader_expected;
             wchlink_write_mode = 0u;
-            wchlink_loader_ready = false;
+            wchlink_loader_ready = wchlink_loader_error == 0u;
         } else {
-            wchlink_loader_received += (uint32_t)length;
+            uint32_t remaining = wchlink_loader_expected - wchlink_loader_received;
+
+            wchlink_loader_received +=
+                length > remaining ? remaining : (uint32_t)length;
         }
-        if (wchlink_loader_error == 0u &&
+        if (!wchlink_loader_variable_length && wchlink_loader_error == 0u &&
             wchlink_loader_received >= wchlink_loader_expected) {
             wchlink_loader_ready = true;
         }
@@ -371,8 +472,23 @@ void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
     if (wchlink_write_mode == 2u && length <= WCHLINK_FLASH_PACKET_SIZE &&
         (length & 3u) == 0u && wchlink_write_remaining != 0u &&
         wchlink_flash_data_received + length <= WCHLINK_FLASH_CHUNK_SIZE) {
-        if (!rvswd_gpio_write_memory(WCHLINK_FLASH_DATA_ADDRESS + wchlink_flash_data_received,
-                                     data, (uint32_t)length)) {
+        uint32_t padded_length;
+        size_t write_length = length;
+        bool ch5xx_loader;
+
+        layout = wchlink_target_loader_layout();
+        ch5xx_loader = wchlink_target_uses_ch5xx_loader();
+        padded_length = wchlink_flash_chunk_length;
+        if (ch5xx_loader) {
+            padded_length = (padded_length + (WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u)) &
+                            ~(WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u);
+        }
+        if (wchlink_flash_data_received + write_length > padded_length) {
+            write_length = padded_length - wchlink_flash_data_received;
+        }
+        if (write_length == 0u ||
+            !rvswd_gpio_write_memory(layout->data + wchlink_flash_data_received,
+                                     data, (uint32_t)write_length)) {
             wchlink_write_mode = 0u;
             wchlink_data_reply_status = rvswd_gpio_memory_last_error();
             if (wchlink_data_reply_status == 0u) {
@@ -381,21 +497,73 @@ void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
             wchlink_data_reply_pending = true;
             return;
         }
-        wchlink_flash_data_received += (uint32_t)length;
+        wchlink_flash_checksum = wchlink_checksum_add(wchlink_flash_checksum, data,
+                                                       write_length);
+        wchlink_flash_data_received += (uint32_t)write_length;
         if (wchlink_flash_data_received >= wchlink_flash_chunk_length) {
             uint32_t result = 0xffffffffu;
-            bool success = rvswd_gpio_execute(
-                WCHLINK_FLASH_LOADER_ADDRESS, 0x0cu, wchlink_write_address,
-                wchlink_flash_chunk_length, WCHLINK_FLASH_DATA_ADDRESS, &result);
+            bool success;
 
-            wchlink_data_reply_status = success && (result == 0u || result == 8u)
-                                            ? 0x04u
-                                            : (uint8_t)result;
+            // CH5xx loader 按完整 256 字节页求和和比较，尾页必须补齐擦除态
+            if (ch5xx_loader && wchlink_flash_data_received < padded_length) {
+                size_t padding_length = padded_length - wchlink_flash_data_received;
+
+                memset(wchlink_flash_padding, 0xff, padding_length);
+                if (!rvswd_gpio_write_memory(layout->data + wchlink_flash_data_received,
+                                             wchlink_flash_padding,
+                                             (uint32_t)padding_length)) {
+                    wchlink_write_mode = 0u;
+                    wchlink_data_reply_status = rvswd_gpio_memory_last_error();
+                    if (wchlink_data_reply_status == 0u) {
+                        wchlink_data_reply_status = 0x15u;
+                    }
+                    wchlink_data_reply_pending = true;
+                    return;
+                }
+                wchlink_flash_checksum = wchlink_checksum_add(
+                    wchlink_flash_checksum, wchlink_flash_padding, padding_length);
+                wchlink_flash_data_received = padded_length;
+            }
+            if ((wchlink_flash_loader_mode & 0x10u) != 0u) {
+                uint32_t checksum_address = 0u;
+
+                // L103 和 CH5xx loader 都在目标 RAM 中接收主机计算的校验和，地址随族切换
+                if (ch5xx_loader) {
+                    checksum_address = WCHLINK_CH5XX_LOADER_CHECKSUM_ADDRESS;
+                } else if (wchlink_target_uses_l103_loader()) {
+                    checksum_address = WCHLINK_L103_LOADER_CHECKSUM_ADDRESS;
+                }
+                if (checksum_address != 0u &&
+                    !rvswd_gpio_write_memory32(checksum_address,
+                                               wchlink_flash_checksum)) {
+                    wchlink_write_mode = 0u;
+                    wchlink_data_reply_status = 0x15u;
+                    wchlink_data_reply_pending = true;
+                    return;
+                }
+            }
+            success = rvswd_gpio_execute(layout->entry, layout->stack_top,
+                                         wchlink_flash_loader_mode,
+                                         wchlink_write_address,
+                                         wchlink_flash_chunk_length, layout->data,
+                                         &result);
+
+            // LinkE 将 loader 的三个标准返回值转换为数据端点状态
+            if (success && result == 0u) {
+                wchlink_data_reply_status = 0x04u;
+            } else if (success && result == 8u) {
+                wchlink_data_reply_status = 0x03u;
+            } else if (success && result == 16u) {
+                wchlink_data_reply_status = 0x05u;
+            } else {
+                wchlink_data_reply_status = (uint8_t)result;
+            }
             wchlink_data_reply_pending = true;
             if (success && wchlink_write_remaining > wchlink_flash_chunk_length) {
                 wchlink_write_address += wchlink_flash_chunk_length;
                 wchlink_write_remaining -= wchlink_flash_chunk_length;
                 wchlink_flash_data_received = 0u;
+                wchlink_flash_checksum = 0u;
                 wchlink_flash_chunk_length = wchlink_write_remaining > WCHLINK_FLASH_CHUNK_SIZE
                                                  ? WCHLINK_FLASH_CHUNK_SIZE
                                                  : wchlink_write_remaining;
@@ -468,6 +636,21 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
     if (family == WCHLINK_FAMILY_CONFIG) {
         return wchlink_config(request, request_length, response, response_capacity);
     }
+    if (family == WCHLINK_FAMILY_DEVICE_MODE && request_length >= 4u) {
+        if (request[3] == WCHLINK_DEVICE_MODE_QUERY) {
+            // MRS 通过第四字节 2 识别 Link 当前处于 RISC-V 调试模式
+            return wchlink_command_reply(response, response_capacity,
+                                         WCHLINK_FAMILY_DEVICE_MODE,
+                                         WCHLINK_DEVICE_MODE_QUERY);
+        }
+        if (request[3] == WCHLINK_DEVICE_MODE_IAP) {
+            // 保留官方 SetIAPMode 的无响应语义，由 USB 层切换到本探针的维护 ISP
+            wchlink_isp_request_pending = true;
+            return SIZE_MAX;
+        }
+        return wchlink_unsupported(response, response_capacity,
+                                    WCHLINK_FAMILY_DEVICE_MODE);
+    }
     if (family == 0x01u && request_length >= 11u) {
         uint32_t first = ((uint32_t)request[3] << 24u) |
                          ((uint32_t)request[4] << 16u) |
@@ -499,6 +682,11 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         switch (request[3]) {
             case 0x01u:
                 wchlink_clear_transfer_state();
+                if (!wchlink_connected) {
+                    // MRS 版本预检会先发送 STOP，基础全擦必须重新建立目标会话
+                    rvswd_gpio_init();
+                    wchlink_connected = rvswd_gpio_connect();
+                }
                 if (!wchlink_connected || !rvswd_gpio_flash_erase_all()) {
                     if (response_capacity >= 4u) {
                         response[0] = WCHLINK_COMMAND_PREFIX;
@@ -521,6 +709,16 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 }
                 wchlink_write_mode = 1u;
                 wchlink_loader_received = 0u;
+                wchlink_loader_error = 0u;
+                wchlink_loader_failure_dmi_status = 0u;
+                wchlink_loader_failure_address = 0u;
+                wchlink_loader_failure_abstractcs = 0u;
+                wchlink_loader_ready = false;
+                // CH58x 和 CH59x 的 loader 长度由主机分包决定，LinkE 以 0x07 作为结束命令
+                wchlink_loader_variable_length = wchlink_target_uses_ch5xx_loader();
+                wchlink_loader_expected = wchlink_loader_variable_length
+                                              ? WCHLINK_CH5XX_LOADER_MAX_SIZE
+                                              : WCHLINK_LOADER_DEFAULT_SIZE;
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x06u:
@@ -528,7 +726,13 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x07u: {
+                const struct wchlink_loader_layout *layout =
+                    wchlink_target_loader_layout();
                 uint32_t result = 0xffffffffu;
+                bool success;
+
+                // 0x07 是 loader 数据阶段的结束边界，成功和失败都不再接收数据
+                wchlink_write_mode = 0u;
                 if (wchlink_loader_error != 0u) {
                     if (response_capacity < 13u) {
                         return 0u;
@@ -548,17 +752,28 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                     response[12] = (uint8_t)wchlink_loader_failure_abstractcs;
                     return 13u;
                 }
-                if (!wchlink_loader_ready) {
+                if ((!wchlink_loader_variable_length && !wchlink_loader_ready) ||
+                    (wchlink_loader_variable_length && wchlink_loader_received == 0u)) {
                     return wchlink_unsupported(response, response_capacity, family);
                 }
-                if (rvswd_gpio_execute(WCHLINK_FLASH_LOADER_ADDRESS, 0x01u, 0u, 0u,
-                                       WCHLINK_FLASH_DATA_ADDRESS, &result) &&
-                    result == 0u &&
+                // LinkE 固件连续两次以 mode 1 初始化 loader
+                success = rvswd_gpio_execute(layout->entry, layout->stack_top, 0x01u,
+                                             0u, 0u, layout->data, &result) &&
+                          result == 0u;
+                if (success) {
+                    success = rvswd_gpio_execute(layout->entry, layout->stack_top,
+                                                 0x01u, 0u, 0u, layout->data,
+                                                 &result) &&
+                              result == 0u;
+                }
+                if (success &&
                     response_capacity >= 4u) {
+                    wchlink_loader_ready = true;
                     return wchlink_command_reply(response, response_capacity, family,
                                                  request[3]);
                 }
                 if (response_capacity >= 4u) {
+                    wchlink_loader_ready = false;
                     response[0] = WCHLINK_COMMAND_PREFIX;
                     response[1] = family;
                     response[2] = 1u;
@@ -568,12 +783,17 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 return 0u;
             }
             case 0x02u:
+            case 0x03u:
             case 0x04u:
                 if (!wchlink_loader_ready || wchlink_write_remaining == 0u) {
                     return wchlink_unsupported(response, response_capacity, family);
                 }
                 wchlink_write_mode = 2u;
                 wchlink_flash_data_received = 0u;
+                wchlink_flash_checksum = 0u;
+                // LinkE 用命令位组合选择 loader 的编程、校验和组合模式
+                wchlink_flash_loader_mode = request[3] == 0x02u ? 0x08u :
+                                            request[3] == 0x03u ? 0x10u : 0x18u;
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x08u:
@@ -587,6 +807,10 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         }
     }
     if (family == WCHLINK_FAMILY_INFO) {
+        // MRS 会在 STOP 前读取扩展信息，只有该会话出现过查询才返回 20 字节
+        if (wchlink_target_uses_ch5xx_loader()) {
+            wchlink_ch5xx_info_query_seen = true;
+        }
         return wchlink_chip_info(response, response_capacity);
     }
     if (family == WCHLINK_FAMILY_SPEED) {
@@ -637,15 +861,25 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
             rvswd_gpio_init();
             wchlink_connected = rvswd_gpio_connect();
             return wchlink_connect_reply(response, response_capacity, wchlink_connected);
-        case WCHLINK_CONTROL_STOP:
+        case WCHLINK_CONTROL_STOP: {
+            bool return_ch5xx_info =
+                wchlink_ch5xx_info_query_seen && wchlink_target_uses_ch5xx_loader();
+
             wchlink_protocol_reset();
+            if (return_ch5xx_info) {
+                // MRS 在 CH5xx 设置芯片阶段从 STOP 命令读取 20 字节目标信息
+                return wchlink_chip_info(response, response_capacity);
+            }
             return wchlink_ack(response, response_capacity, family);
+        }
         case WCHLINK_CONTROL_SET_CHIP_TYPE:
             // MRS 将设置目标型号命令作为首次目标连接入口
             if (wchlink_connected) {
                 // wlink 在已连接会话中使用同一子命令查询 ROM/RAM 分割
                 return wchlink_ack(response, response_capacity, family);
             }
+            // MRS 在设置两线速度后立即发起连接，目标调试模块需要短暂稳定时间
+            bsp_delay_ms(20u);
             rvswd_gpio_init();
             wchlink_connected = rvswd_gpio_connect();
             return wchlink_connect_reply(response, response_capacity, wchlink_connected);

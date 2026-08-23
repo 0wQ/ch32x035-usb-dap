@@ -23,8 +23,9 @@ uint32_t rvswd_gpio_memory_failure_abstractcs(void);
 bool rvswd_gpio_write_register(uint16_t regno, uint32_t value);
 bool rvswd_gpio_read_register(uint16_t regno, uint32_t *value);
 bool rvswd_gpio_halt(void);
-bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
-                        uint32_t length, uint32_t data_address, uint32_t *result);
+bool rvswd_gpio_execute(uint32_t entry, uint32_t stack_top, uint32_t mode,
+                        uint32_t address, uint32_t length, uint32_t data_address,
+                        uint32_t *result);
 bool rvswd_gpio_flash_erase_all(void);
 bool rvswd_gpio_flash_read_protected(bool *protected);
 bool rvswd_gpio_flash_write_protected(bool *protected);

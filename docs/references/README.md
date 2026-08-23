@@ -1,16 +1,28 @@
 # RVSWD / WCH-Link 参考资料
 
-本目录收录 CH32X035 模拟 WCH-LinkE、通过 RVSWD 调试和烧录 CH32V307 时直接需要的资料。它不参与固件构建，目的是让协议、规范、抓包和上游实现不再依赖工作区外的 `.docs/`、`.tmp/` 目录。
+本目录收录 CH32X035 模拟 WCH-LinkE、通过 RVSWD 调试和烧录多个 WCH RISC-V 目标族时需要的协议、规范、抓包和上游实现。它不参与固件构建，目的是让这些资料不再依赖工作区外的 `.docs/`、`.tmp/` 目录。
 
-当前范围是 CH32V307 的双线 RVSWD 和 WCH-Link USB direct-DMI 路径，不等同于完整复刻 WCH-LinkE 固件。
+当前实现以 CH32V307 的双线 RVSWD 和 WCH-Link USB direct-DMI 路径作为已验证基线，其他目标族按独立的 ChipID、family、Flash profile 和 loader 逐步适配。这里的单一目标证据不能直接外推到其他芯片，也不等同于完整复刻 WCH-LinkE 固件。
+
+## 事实依据和验收优先级
+
+涉及 MRS 烧录、WCH-Link 命令和目标族兼容性时，按以下顺序采信和验收：
+
+1. `libmcuupdate.dylib`，MRS 内部烧录核心，负责擦除、编程、校验和复位入口
+2. `wch-openocd`，MRS 内置调试和 GDB 工具
+3. `FIRMWARE_CH32V305.bin`，官方 LinkE 固件的静态事实依据
+4. `wlink`，第三方 Rust 工具，只作辅助交叉验证
+5. `minichlink`，低优先级参考实现
+
+`libmcuupdate.dylib`、`wch-openocd` 和 `FIRMWARE_CH32V305.bin` 的证据优先级相同，高于 `wlink` 和 `minichlink`
 
 ## 使用顺序
 
-1. 先读 `official/qingke-v4-processor-manual-v1.5.pdf` 第 7 章，确认 CH32V307 的 Debug Module 行为
-2. 以 `official/riscv-debug-0.13.2.pdf` 作为 `dmstatus`、`abstractcs`、`command` 和 Program Buffer 的规范依据
-3. 用 `code/ch32-tapioca-probe/docs/wch-rvswd-protocol.md`、`rvswd_frame.hpp` 和测试夹具核对 52-bit 短帧
-4. 用 `code/ch32-tapioca-probe/docs/wch-link-usb-protocol.md`、`code/wlink/` 核对 USB 请求和回复
-5. 分析新抓取的波形时使用 `code/sigrok-rvswd/pd.py`，并与 `captures/` 的真实 LinkE 基线对比
+1. 先读目标芯片对应的 QingKe、调试模块和 Flash 资料，确认该目标族的寄存器与访问边界
+2. 以 `official/riscv-debug-0.13.2.pdf` 和 `official/riscv-debug-1.0.pdf` 作为通用 Debug Module 规范依据，再标注芯片手册中的差异
+3. 用 `code/ch32-tapioca-probe/docs/wch-rvswd-protocol.md`、`rvswd_frame.hpp` 和测试夹具核对 RVSWD 帧格式
+4. 用 `code/ch32-tapioca-probe/docs/wch-link-usb-protocol.md`、`code/wlink/` 核对 WCH-Link USB 请求、回复和 host 侧重试行为
+5. 分析新抓取的波形时使用 `code/sigrok-rvswd/pd.py`，并与对应目标族的真实 LinkE 基线对比；当前仓库内的 CSV 是 CH32V307 基线
 
 ## 导航
 
@@ -20,6 +32,7 @@
 | [`notes/ch32v307-rvswd-mvp.md`](notes/ch32v307-rvswd-mvp.md) | 当前实现的事实、边界和排查顺序 | 避免混用 JTAG DTM、RVSWD short frame 与 WCH 私有扩展 |
 | [`notes/wch-link-reset-modes.md`](notes/wch-link-reset-modes.md) | WCH-Link 下载复位、全擦触发方式和 MRS 复位命令证据边界 | 区分复位后运行、硬件复位脚全擦和重新上电全擦 |
 | [`notes/wch-openocd-flash-loader-transfer.md`](notes/wch-openocd-flash-loader-transfer.md) | WCH OpenOCD 的 loader 选择和下发路径 | 确认目标专用 loader 由上位机持有并通过数据端点传输 |
+| [`notes/wch-linke-ch5xx-firmware-evidence.md`](notes/wch-linke-ch5xx-firmware-evidence.md) | LinkE 固件中的 CH5xx ChipID、loader 和全擦证据 | CH58x/CH59x RAM 布局、loader mode、命令口与长度边界 |
 | [`notes/wch-linke-option-byte-dispatch.md`](notes/wch-linke-option-byte-dispatch.md) | 原厂 Link 固件中的保护命令和 family 分派 | 约束 Flash profile 分组和 Option Bytes 实现 |
 | [`code/ch32-tapioca-probe/`](code/ch32-tapioca-probe/) | 52-bit codec、捕获夹具和 USB 协议文档 | 帧格式和 WCH-Link direct-DMI 协议的主要交叉验证 |
 | [`code/sigrok-rvswd/`](code/sigrok-rvswd/) | Sigrok RVSWD 协议解码器 | 解码 52-bit short frame 与 84-bit long frame |

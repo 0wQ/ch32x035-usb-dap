@@ -1,5 +1,7 @@
 #include "wchlink_usb.h"
 
+#include "bsp/bsp_delay.h"
+#include "bsp/bsp_system.h"
 #include "bsp/bsp_uid.h"
 #include "wchlink_protocol.h"
 
@@ -10,11 +12,17 @@
 #include <usbd_cdc_acm.h>
 #include <usbd_core.h>
 
+#include <usb_ch32x035_dc_usbfs.h>
+
 #define WCHLINK_MPS 64u
 #define WCHLINK_SERIAL_LEN 13u
 #define WCHLINK_CONFIG_DESC_SIZE 120u
 #define WCHLINK_VID 0x1a86u
 #define WCHLINK_PID 0x8010u
+#define WCHLINK_CONTROL_FAMILY 0x0du
+#define WCHLINK_CONTROL_STOP 0xffu
+#define WCHLINK_STOP_RESPONSE_LIFETIME_US 500000u
+#define WCHLINK_RESPONSE_LIFETIME_US 100000u
 
 static const uint8_t wchlink_device_descriptor[] = {
     USB_DEVICE_DESCRIPTOR_INIT(USB_1_1, 0xef, 0x02, 0x01,
@@ -111,6 +119,9 @@ static volatile bool wchlink_request_pending;
 static volatile bool wchlink_request_armed;
 static volatile bool wchlink_response_pending;
 static volatile bool wchlink_response_recovery_pending;
+static volatile bool wchlink_response_expiring;
+static volatile bool wchlink_response_is_stop;
+static uint64_t wchlink_response_deadline_us;
 static volatile bool wchlink_data_in_pending;
 static volatile bool wchlink_data_out_active;
 static volatile bool wchlink_data_out_pending;
@@ -140,12 +151,12 @@ static void wchlink_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     (void)ep;
     wchlink_request_armed = false;
-    if (wchlink_response_pending) {
-        // 新主机接管时丢弃上一个进程未读取的响应，解除 OUT 端点阻塞
-        wchlink_response_recovery_pending = true;
-    }
     if (nbytes > sizeof(wchlink_request)) {
         nbytes = sizeof(wchlink_request);
+    }
+    if (wchlink_response_pending) {
+        // 主机进程退出不会产生 USB reset，交给主循环复位残留 IN 传输
+        wchlink_response_recovery_pending = true;
     }
     wchlink_request_length = (uint16_t)nbytes;
     wchlink_request_pending = true;
@@ -157,6 +168,8 @@ static void wchlink_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)nbytes;
     wchlink_response_pending = false;
     wchlink_response_recovery_pending = false;
+    wchlink_response_expiring = false;
+    wchlink_response_is_stop = false;
     wchlink_arm_request();
 }
 
@@ -207,6 +220,8 @@ static void wchlink_event_handler(uint8_t busid, uint8_t event) {
             wchlink_request_armed = false;
             wchlink_response_pending = false;
             wchlink_response_recovery_pending = false;
+            wchlink_response_expiring = false;
+            wchlink_response_is_stop = false;
             wchlink_data_in_pending = false;
             wchlink_data_out_active = false;
             wchlink_data_out_pending = false;
@@ -221,6 +236,8 @@ static void wchlink_event_handler(uint8_t busid, uint8_t event) {
             wchlink_request_armed = false;
             wchlink_response_pending = false;
             wchlink_response_recovery_pending = false;
+            wchlink_response_expiring = false;
+            wchlink_response_is_stop = false;
             wchlink_data_in_pending = false;
             wchlink_data_out_active = false;
             wchlink_data_out_pending = false;
@@ -287,12 +304,13 @@ static void wchlink_cdc_service(void) {
     if (!wchlink_configured) {
         return;
     }
-    // CDC 暂不映射 UART，先用单包回环验证复合设备和数据通路
+    // CDC 数据通道保持原始回环行为，不参与探针维护状态切换
     if (wchlink_cdc_out_pending && !wchlink_cdc_in_pending) {
         __disable_irq();
         data_length = wchlink_cdc_out_length;
         wchlink_cdc_out_pending = false;
         __enable_irq();
+
         wchlink_cdc_in_pending = true;
         if (usbd_ep_start_write(0u, 0x83u, wchlink_cdc_packet,
                                 data_length) != 0) {
@@ -372,9 +390,8 @@ static void wchlink_service_data_out(void) {
         wchlink_response_recovery_pending = false;
         wchlink_response_pending = false;
         __enable_irq();
-        // 主机进程退出不会产生 USB reset，主动复位 IN 端点以清除残留传输
-        (void)usbd_ep_set_stall(0u, 0x81u);
-        (void)usbd_ep_clear_stall(0u, 0x81u);
+        // 主机超时后仍保留其当前 IN toggle，取消设备侧未完成传输即可
+        (void)ch32x035_usbd_ep_abort_in(0u, 0x81u);
     }
 
     if (wchlink_data_out_pending) {
@@ -395,6 +412,22 @@ static void wchlink_service_data_out(void) {
     }
 }
 
+static void wchlink_service_response_timeout(void) {
+    if (!wchlink_response_pending || !wchlink_response_expiring ||
+        bsp_time_us() < wchlink_response_deadline_us) {
+        return;
+    }
+
+    // 主机异常退出时释放未读取的 IN 回复，避免下一会话永久阻塞
+    __disable_irq();
+    wchlink_response_pending = false;
+    wchlink_response_expiring = false;
+    wchlink_response_is_stop = false;
+    __enable_irq();
+    (void)ch32x035_usbd_ep_abort_in(0u, 0x81u);
+    wchlink_arm_request();
+}
+
 void wchlink_usb_process(void) {
     uint8_t request[WCHLINK_MPS];
     uint16_t request_length;
@@ -404,6 +437,7 @@ void wchlink_usb_process(void) {
         return;
     }
 
+    wchlink_service_response_timeout();
     wchlink_service_data_out();
     wchlink_service_data_in();
     wchlink_cdc_service();
@@ -422,13 +456,33 @@ void wchlink_usb_process(void) {
 
     response_length = wchlink_protocol_process(request, request_length,
                                                wchlink_response, sizeof(wchlink_response));
+    if (wchlink_protocol_take_isp_request()) {
+        bsp_system_enter_isp();
+    }
+    if (response_length == SIZE_MAX) {
+        wchlink_arm_request();
+        return;
+    }
     if (response_length == 0u) {
         response_length = 4u;
         memset(wchlink_response, 0, response_length);
     }
     wchlink_response_pending = true;
+    // 所有回复都设置有限生命周期，STOP 使用更短窗口并保留跨会话 toggle 恢复
+    wchlink_response_expiring = true;
+    wchlink_response_is_stop =
+        request_length >= 4u && request[1] == WCHLINK_CONTROL_FAMILY &&
+        request[3] == WCHLINK_CONTROL_STOP;
+    wchlink_response_deadline_us =
+        bsp_time_us() +
+        (request_length >= 4u && request[1] == WCHLINK_CONTROL_FAMILY &&
+         request[3] == WCHLINK_CONTROL_STOP
+             ? WCHLINK_STOP_RESPONSE_LIFETIME_US
+             : WCHLINK_RESPONSE_LIFETIME_US);
     if (usbd_ep_start_write(0u, 0x81u, wchlink_response, (uint32_t)response_length) != 0) {
         wchlink_response_pending = false;
+        wchlink_response_expiring = false;
+        wchlink_response_is_stop = false;
         wchlink_arm_request();
     }
     wchlink_service_data_in();

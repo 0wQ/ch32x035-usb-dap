@@ -8,7 +8,8 @@
 
 #define RVSWD_CLOCK_PIN GPIO_Pin_2
 #define RVSWD_DATA_PIN  GPIO_Pin_3
-#define RVSWD_PINS      (RVSWD_CLOCK_PIN | RVSWD_DATA_PIN)
+#define RVSWD_DATA_PULLUP_PIN GPIO_Pin_1
+#define RVSWD_PINS      (RVSWD_DATA_PULLUP_PIN | RVSWD_CLOCK_PIN | RVSWD_DATA_PIN)
 
 #define RVSWD_DMI_CONTROL 0x10u
 #define RVSWD_DMI_CONFIG  0x7du
@@ -27,7 +28,6 @@
 #define RVSWD_ABSTRACT_TIMEOUT_US       10000u
 #define RVSWD_RESUME_MIN_DELAY_US       1000u
 #define RVSWD_EXECUTE_TIMEOUT_MS        5000u
-#define RVSWD_LOADER_STACK_TOP          0x20005000u
 #define RVSWD_DEBUG_UNLOCK              0x5aa50400u
 
 #define RVSWD_CHIP_FAMILY_MASK 0xfff00000u
@@ -36,6 +36,27 @@
 #define RVSWD_CHIP_FAMILY_V303 0x30300000u
 #define RVSWD_CHIP_FAMILY_V305 0x30500000u
 #define RVSWD_CHIP_FAMILY_V307 0x30700000u
+#define RVSWD_CHIP_FAMILY_CH591 0x91000000u
+#define RVSWD_CHIP_FAMILY_CH592 0x92000000u
+#define RVSWD_CHIP_FAMILY_CH582 0x82000000u
+#define RVSWD_CHIP_FAMILY_CH583 0x83000000u
+
+#define RVSWD_CH5XX_CHIP_ID_ADDRESS 0x40001041u
+#define RVSWD_CH5XX_CHIP_ID_CH591   0x91u
+#define RVSWD_CH5XX_CHIP_ID_CH592   0x92u
+#define RVSWD_CH5XX_CHIP_ID_CH582   0x82u
+#define RVSWD_CH5XX_CHIP_ID_CH583   0x83u
+
+#define RVSWD_CH5XX_FLASH_KEY_ADDRESS     0x40001040u
+#define RVSWD_CH5XX_FLASH_DATA_ADDRESS    0x40001804u
+#define RVSWD_CH5XX_FLASH_CONTROL_ADDRESS 0x40001806u
+#define RVSWD_CH5XX_DEBUG_DATA_ADDRESS     0xe0000380u
+#define RVSWD_CH5XX_FLASH_END             0x00078000u
+#define RVSWD_CH5XX_FLASH_BLOCK_4K         0x00001000u
+#define RVSWD_CH5XX_FLASH_STATUS_RETRIES   102u
+#define RVSWD_CH5XX_ERASE_STUB_ADDRESS     0x20004000u
+#define RVSWD_CH5XX_ERASE_STUB_STACK_TOP   0x20007000u
+#define RVSWD_CH5XX_ERASE_STUB_MAX_SIZE    512u
 
 #define RVSWD_FLASH_KEYR_ADDRESS     0x40022004u
 #define RVSWD_FLASH_OBKEYR_ADDRESS   0x40022008u
@@ -70,6 +91,8 @@
 #define RVSWD_FLASH_ERASE_TIMEOUT_US    6000000u
 
 #define RVSWD_WCHLINK_FAMILY_V30X 0x06u
+#define RVSWD_WCHLINK_FAMILY_CH59X 0x0bu
+#define RVSWD_WCHLINK_FAMILY_CH58X 0x07u
 #define RVSWD_WCHLINK_FAMILY_X035 0x0du
 #define RVSWD_WCHLINK_FAMILY_L103 0x0eu
 
@@ -85,6 +108,7 @@ enum rvswd_option_write_mode {
 
 struct rvswd_target_profile {
     uint8_t wchlink_family;
+    bool ch5xx_protocol;
     enum rvswd_flash_unlock_mode erase_unlock;
     enum rvswd_option_write_mode option_write;
     uint32_t option_base;
@@ -92,6 +116,7 @@ struct rvswd_target_profile {
 
 static const struct rvswd_target_profile rvswd_target_profile_x035 = {
     .wchlink_family = RVSWD_WCHLINK_FAMILY_X035,
+    .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
     .option_base = RVSWD_OPTION_BYTES_ADDRESS,
@@ -99,6 +124,7 @@ static const struct rvswd_target_profile rvswd_target_profile_x035 = {
 
 static const struct rvswd_target_profile rvswd_target_profile_l103 = {
     .wchlink_family = RVSWD_WCHLINK_FAMILY_L103,
+    .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_OPTION_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
     .option_base = RVSWD_OPTION_BYTES_ADDRESS,
@@ -106,9 +132,28 @@ static const struct rvswd_target_profile rvswd_target_profile_l103 = {
 
 static const struct rvswd_target_profile rvswd_target_profile_v30x = {
     .wchlink_family = RVSWD_WCHLINK_FAMILY_V30X,
+    .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_HALFWORD,
     .option_base = RVSWD_OPTION_BYTES_ADDRESS,
+};
+
+static const struct rvswd_target_profile rvswd_target_profile_ch59x = {
+    .wchlink_family = RVSWD_WCHLINK_FAMILY_CH59X,
+    .ch5xx_protocol = true,
+    // CH5xx 使用专用 Flash 命令和 loader，这两个字段只为保持 profile 接口完整
+    .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
+    .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
+    .option_base = 0u,
+};
+
+static const struct rvswd_target_profile rvswd_target_profile_ch58x = {
+    .wchlink_family = RVSWD_WCHLINK_FAMILY_CH58X,
+    .ch5xx_protocol = true,
+    // CH58x 使用专用 Flash 命令和 loader，这两个字段只为保持 profile 接口完整
+    .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
+    .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
+    .option_base = 0u,
 };
 
 static uint32_t rvswd_flash_last_error;
@@ -123,9 +168,13 @@ static uint32_t rvswd_memory_failure_abstractcs;
 static uint8_t rvswd_dmi_last_status;
 static bool rvswd_dmi_failure_retryable;
 
+extern const uint8_t ch5xx_flash_erase_stub_start[];
+extern const uint8_t ch5xx_flash_erase_stub_end[];
+
 static bool rvswd_gpio_wait_abstract_idle_timeout(uint32_t *abstractcs,
                                                   uint32_t timeout_us);
 static bool rvswd_gpio_wait_abstract_idle(uint32_t *abstractcs);
+static bool rvswd_gpio_write_raw_gpr(uint8_t regno, uint32_t value);
 
 static const struct rvswd_target_profile *rvswd_gpio_profile_from_chip_id(
     uint32_t chip_id) {
@@ -138,6 +187,12 @@ static const struct rvswd_target_profile *rvswd_gpio_profile_from_chip_id(
         case RVSWD_CHIP_FAMILY_V305:
         case RVSWD_CHIP_FAMILY_V307:
             return &rvswd_target_profile_v30x;
+        case RVSWD_CHIP_FAMILY_CH591:
+        case RVSWD_CHIP_FAMILY_CH592:
+            return &rvswd_target_profile_ch59x;
+        case RVSWD_CHIP_FAMILY_CH582:
+        case RVSWD_CHIP_FAMILY_CH583:
+            return &rvswd_target_profile_ch58x;
         default:
             return NULL;
     }
@@ -152,6 +207,10 @@ static const struct rvswd_target_profile *rvswd_gpio_profile_from_wchlink_family
             return &rvswd_target_profile_l103;
         case RVSWD_WCHLINK_FAMILY_V30X:
             return &rvswd_target_profile_v30x;
+        case RVSWD_WCHLINK_FAMILY_CH59X:
+            return &rvswd_target_profile_ch59x;
+        case RVSWD_WCHLINK_FAMILY_CH58X:
+            return &rvswd_target_profile_ch58x;
         default:
             return NULL;
     }
@@ -385,16 +444,17 @@ static uint32_t rvswd_unpack_data(const uint8_t *target) {
 
 void rvswd_gpio_init(void) {
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOA;
-    GPIOA->BSHR = RVSWD_PINS;
-    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 8u) | (0xfu << 12u))) |
-                   (0x01u << 8u) | (0x08u << 12u);
+    // PA1 通过外部电阻给 SWDIO 提供上拉，必须在首帧前保持高电平
+    GPIOA->BSHR = RVSWD_DATA_PULLUP_PIN | RVSWD_CLOCK_PIN | RVSWD_DATA_PIN;
+    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 4u) | (0xfu << 8u) | (0xfu << 12u))) |
+                   (0x01u << 4u) | (0x01u << 8u) | (0x08u << 12u);
 }
 
 void rvswd_gpio_disconnect(void) {
     GPIOA->BSHR = RVSWD_PINS;
-    // 会话结束后释放两根信号线，避免目标断电时通过调试引脚倒灌
-    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 8u) | (0xfu << 12u))) |
-                   (0x04u << 8u) | (0x04u << 12u);
+    // 会话结束后释放 PA1 上拉控制和两根调试线，避免目标断电时通过调试引脚倒灌
+    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xfu << 4u) | (0xfu << 8u) | (0xfu << 12u))) |
+                   (0x04u << 4u) | (0x04u << 8u) | (0x04u << 12u);
 }
 
 static uint8_t rvswd_gpio_write_dmi_once(uint8_t address, uint32_t value) {
@@ -504,6 +564,126 @@ static bool rvswd_gpio_read_memory32_synchronized(uint32_t address, uint32_t *va
     return true;
 }
 
+static bool rvswd_gpio_read_memory8_ch5xx(uint32_t address, uint8_t *value) {
+    uint32_t abstractcs;
+    uint32_t data;
+
+    // LinkE 通过 data0 传入地址，Program Buffer 将目标字节写回 data1
+    if (value == NULL ||
+        !rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_DEBUG_DATA_ADDRESS) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x20u, 0x00058483u) ||
+        !rvswd_gpio_write_dmi(0x21u, 0x00968223u) ||
+        !rvswd_gpio_write_dmi(0x22u, 0x00100073u) ||
+        !rvswd_gpio_write_dmi(0x04u, address) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x0027100bu) ||
+        !rvswd_gpio_wait_abstract_idle(&abstractcs) ||
+        ((abstractcs >> 8u) & 0x07u) != 0u ||
+        !rvswd_gpio_read_dmi(0x05u, &data)) {
+        return false;
+    }
+
+    *value = (uint8_t)data;
+    return true;
+}
+
+static bool rvswd_gpio_write_memory8_ch5xx(uint32_t address, uint8_t value) {
+    uint32_t abstractcs;
+
+    // LinkE 通过 data0 传入地址，Program Buffer 从 data1 取出目标字节
+    if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_DEBUG_DATA_ADDRESS) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x20u, 0x00468483u) ||
+        !rvswd_gpio_write_dmi(0x21u, 0x00958023u) ||
+        !rvswd_gpio_write_dmi(0x22u, 0x00100073u) ||
+        !rvswd_gpio_write_dmi(0x05u, value) ||
+        !rvswd_gpio_write_dmi(0x04u, address) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x0027100bu) ||
+        !rvswd_gpio_wait_abstract_idle(&abstractcs)) {
+        return false;
+    }
+
+    return ((abstractcs >> 8u) & 0x07u) == 0u;
+}
+
+enum rvswd_ch5xx_byte_access_mode {
+    RVSWD_CH5XX_BYTE_ACCESS_NONE,
+    RVSWD_CH5XX_BYTE_ACCESS_READ,
+    RVSWD_CH5XX_BYTE_ACCESS_WRITE,
+};
+
+struct rvswd_ch5xx_byte_access {
+    enum rvswd_ch5xx_byte_access_mode mode;
+};
+
+static bool rvswd_gpio_ch5xx_prepare_byte_access(
+    struct rvswd_ch5xx_byte_access *access,
+    enum rvswd_ch5xx_byte_access_mode mode) {
+    uint32_t load_instruction;
+    uint32_t store_instruction;
+
+    if (access->mode == mode) {
+        return true;
+    }
+
+    if (mode == RVSWD_CH5XX_BYTE_ACCESS_READ) {
+        load_instruction = 0x00058483u;
+        store_instruction = 0x00968223u;
+    } else if (mode == RVSWD_CH5XX_BYTE_ACCESS_WRITE) {
+        load_instruction = 0x00468483u;
+        store_instruction = 0x00958023u;
+    } else {
+        return false;
+    }
+
+    // 全擦期间连续访问 Flash 命令口，切换读写方向时才重建 Program Buffer
+    if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_DEBUG_DATA_ADDRESS) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x20u, load_instruction) ||
+        !rvswd_gpio_write_dmi(0x21u, store_instruction) ||
+        !rvswd_gpio_write_dmi(0x22u, 0x00100073u)) {
+        access->mode = RVSWD_CH5XX_BYTE_ACCESS_NONE;
+        return false;
+    }
+
+    access->mode = mode;
+    return true;
+}
+
+static bool rvswd_gpio_ch5xx_erase_write8(struct rvswd_ch5xx_byte_access *access,
+                                          uint32_t address, uint8_t value) {
+    uint32_t abstractcs;
+
+    if (!rvswd_gpio_ch5xx_prepare_byte_access(access, RVSWD_CH5XX_BYTE_ACCESS_WRITE) ||
+        !rvswd_gpio_write_dmi(0x05u, value) ||
+        !rvswd_gpio_write_dmi(0x04u, address) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x0027100bu) ||
+        !rvswd_gpio_wait_abstract_idle(&abstractcs)) {
+        return false;
+    }
+
+    return ((abstractcs >> 8u) & 0x07u) == 0u;
+}
+
+static bool rvswd_gpio_ch5xx_erase_read8(struct rvswd_ch5xx_byte_access *access,
+                                         uint32_t address, uint8_t *value) {
+    uint32_t abstractcs;
+    uint32_t data;
+
+    if (value == NULL ||
+        !rvswd_gpio_ch5xx_prepare_byte_access(access, RVSWD_CH5XX_BYTE_ACCESS_READ) ||
+        !rvswd_gpio_write_dmi(0x04u, address) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x0027100bu) ||
+        !rvswd_gpio_wait_abstract_idle(&abstractcs) ||
+        ((abstractcs >> 8u) & 0x07u) != 0u ||
+        !rvswd_gpio_read_dmi(0x05u, &data)) {
+        return false;
+    }
+
+    *value = (uint8_t)data;
+    return true;
+}
+
 static bool rvswd_gpio_read_memory32_v30x_once(uint32_t address, uint32_t *value) {
     uint32_t abstractcs;
     uint32_t data;
@@ -580,7 +760,9 @@ bool rvswd_gpio_read_memory32(uint32_t address, uint32_t *value) {
             rvswd_gpio_profile_from_wchlink_family(rvswd_expected_wchlink_family);
     }
     if (profile != NULL &&
-        profile->wchlink_family == RVSWD_WCHLINK_FAMILY_L103) {
+        (profile->wchlink_family == RVSWD_WCHLINK_FAMILY_L103 ||
+         profile->wchlink_family == RVSWD_WCHLINK_FAMILY_CH58X ||
+         profile->wchlink_family == RVSWD_WCHLINK_FAMILY_CH59X)) {
         return rvswd_gpio_read_memory32_synchronized(address, value);
     }
     if (rvswd_gpio_read_memory32_v30x(address, value)) {
@@ -839,8 +1021,9 @@ bool rvswd_gpio_halt(void) {
            rvswd_gpio_wait_dmstatus(1u << 9u, true, 100u);
 }
 
-bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
-                        uint32_t length, uint32_t data_address, uint32_t *result) {
+bool rvswd_gpio_execute(uint32_t entry, uint32_t stack_top, uint32_t mode,
+                        uint32_t address, uint32_t length, uint32_t data_address,
+                        uint32_t *result) {
     if (!rvswd_gpio_write_raw_gpr(10u, mode)) {
         if (result != NULL) *result = 0xe001u;
         return false;
@@ -857,7 +1040,7 @@ bool rvswd_gpio_execute(uint32_t entry, uint32_t mode, uint32_t address,
         if (result != NULL) *result = 0xe004u;
         return false;
     }
-    if (!rvswd_gpio_write_register(0x1002u, RVSWD_LOADER_STACK_TOP) ||
+    if (!rvswd_gpio_write_register(0x1002u, stack_top) ||
         !rvswd_gpio_write_register(0x7b0u, 0x000090c3u) ||
         !rvswd_gpio_write_register(0x300u, 0u) ||
         !rvswd_gpio_write_register(0x7b1u, entry)) {
@@ -941,6 +1124,139 @@ static bool rvswd_gpio_flash_unlock_main_and_fast(uint32_t control) {
     return true;
 }
 
+static bool rvswd_gpio_ch5xx_flash_issue(struct rvswd_ch5xx_byte_access *access,
+                                         uint8_t command) {
+    return rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 5u) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS, command);
+}
+
+static bool rvswd_gpio_ch5xx_flash_begin(struct rvswd_ch5xx_byte_access *access,
+                                         uint8_t command) {
+    return rvswd_gpio_ch5xx_flash_issue(access, 6u) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u) &&
+           rvswd_gpio_ch5xx_flash_issue(access, command);
+}
+
+static bool rvswd_gpio_ch5xx_flash_unlock(void) {
+    uint32_t abstractcs;
+
+    // 与 LinkE 使用同一段 Program Buffer，在一次执行中连续写入 key 和擦除模式
+    if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_FLASH_KEY_ADDRESS) ||
+        !rvswd_gpio_write_raw_gpr(10u, 0x57u) ||
+        !rvswd_gpio_write_raw_gpr(11u, 0xa8u) ||
+        !rvswd_gpio_write_raw_gpr(12u, 0xe0u) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x20u, 0x00a68023u) ||
+        !rvswd_gpio_write_dmi(0x21u, 0x00b68023u) ||
+        !rvswd_gpio_write_dmi(0x22u, 0x00010001u) ||
+        !rvswd_gpio_write_dmi(0x23u, 0x00c68223u) ||
+        !rvswd_gpio_write_dmi(0x24u, 0x00100073u) ||
+        !rvswd_gpio_write_dmi(0x17u, 0x00271000u) ||
+        !rvswd_gpio_wait_abstract_idle(&abstractcs)) {
+        return false;
+    }
+
+    return ((abstractcs >> 8u) & 0x07u) == 0u;
+}
+
+static bool rvswd_gpio_ch5xx_flash_write_address(struct rvswd_ch5xx_byte_access *access,
+                                                 uint32_t address) {
+    return rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
+                                         (uint8_t)(address >> 16u)) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
+                                         (uint8_t)(address >> 8u)) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
+                                         (uint8_t)address);
+}
+
+static bool rvswd_gpio_ch5xx_flash_wait_ready(struct rvswd_ch5xx_byte_access *access) {
+    if (!rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u)) {
+        rvswd_flash_last_error = 0xc4u;
+        return false;
+    }
+
+    for (uint32_t retry = 0u; retry < RVSWD_CH5XX_FLASH_STATUS_RETRIES; ++retry) {
+        uint8_t status;
+
+        // LinkE 连续读取两次状态，第二次读数用于判断命令是否仍在执行
+        if (!rvswd_gpio_ch5xx_flash_issue(access, 5u)) {
+            rvswd_flash_last_error = 0xc5u;
+            return false;
+        }
+        if (!rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
+                                          &status)) {
+            rvswd_flash_last_error = 0xc6u;
+            return false;
+        }
+        if (!rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
+                                          &status)) {
+            rvswd_flash_last_error = 0xc7u;
+            return false;
+        }
+        if (!rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS,
+                                           0u)) {
+            rvswd_flash_last_error = 0xc8u;
+            return false;
+        }
+        if ((status & 1u) == 0u) {
+            return true;
+        }
+    }
+    rvswd_flash_last_error = 0xc9u;
+    return false;
+}
+
+static bool rvswd_gpio_ch5xx_flash_erase_block(struct rvswd_ch5xx_byte_access *access,
+                                               uint32_t address) {
+    if (!rvswd_gpio_ch5xx_flash_begin(access, 0x20u)) {
+        rvswd_flash_last_error = 0xc2u;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_write_address(access, address)) {
+        rvswd_flash_last_error = 0xc3u;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_wait_ready(access)) {
+        return false;
+    }
+    return true;
+}
+
+static bool rvswd_gpio_ch5xx_flash_erase_all(void) {
+    size_t stub_length =
+        (size_t)(ch5xx_flash_erase_stub_end - ch5xx_flash_erase_stub_start);
+    uint32_t result;
+
+    // RAM stub 按 LinkE 固件的 4 KiB 扇区路径完成整片擦除
+    if (stub_length == 0u || stub_length > RVSWD_CH5XX_ERASE_STUB_MAX_SIZE ||
+        (stub_length & 3u) != 0u) {
+        rvswd_flash_last_error = 0xc1u;
+        return false;
+    }
+    if (!rvswd_gpio_write_memory(RVSWD_CH5XX_ERASE_STUB_ADDRESS,
+                                 ch5xx_flash_erase_stub_start,
+                                 (uint32_t)stub_length)) {
+        rvswd_flash_last_error = 0xc2u;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_unlock()) {
+        rvswd_flash_last_error = 0xc3u;
+        return false;
+    }
+    if (!rvswd_gpio_execute(RVSWD_CH5XX_ERASE_STUB_ADDRESS,
+                            RVSWD_CH5XX_ERASE_STUB_STACK_TOP, 0u, 0u,
+                            RVSWD_CH5XX_FLASH_END, 0u, &result)) {
+        rvswd_flash_last_error = 0xc4u;
+        return false;
+    }
+    if (result != 0u) {
+        rvswd_flash_last_error = 0xc5u;
+        return false;
+    }
+    return true;
+}
+
 bool rvswd_gpio_flash_erase_all(void) {
     const struct rvswd_target_profile *profile = rvswd_gpio_target_profile();
     uint32_t control;
@@ -953,6 +1269,9 @@ bool rvswd_gpio_flash_erase_all(void) {
     if (profile == NULL) {
         rvswd_flash_last_error = 0x0fu;
         return false;
+    }
+    if (profile->ch5xx_protocol) {
+        return rvswd_gpio_ch5xx_flash_erase_all();
     }
 
     if (!rvswd_gpio_flash_wait_ready(&status, 0x11u, 0x12u)) {
@@ -1043,7 +1362,7 @@ bool rvswd_gpio_flash_read_protected(bool *protected) {
         rvswd_flash_last_error = 0x21u;
         return false;
     }
-    if (profile == NULL) {
+    if (profile == NULL || profile->ch5xx_protocol) {
         rvswd_flash_last_error = 0x22u;
         return false;
     }
@@ -1065,7 +1384,7 @@ bool rvswd_gpio_flash_write_protected(bool *protected) {
         rvswd_flash_last_error = 0x24u;
         return false;
     }
-    if (profile == NULL) {
+    if (profile == NULL || profile->ch5xx_protocol) {
         rvswd_flash_last_error = 0x25u;
         return false;
     }
@@ -1447,7 +1766,7 @@ bool rvswd_gpio_flash_set_read_protected(bool protected) {
     uint32_t option_words[RVSWD_OPTION_BYTES_WORD_COUNT];
     bool current;
 
-    if (profile == NULL) {
+    if (profile == NULL || profile->ch5xx_protocol) {
         rvswd_flash_last_error = 0x22u;
         return false;
     }
@@ -1585,7 +1904,19 @@ static bool rvswd_gpio_identify_target(void) {
     const struct rvswd_target_profile *expected_profile =
         rvswd_gpio_profile_from_wchlink_family(rvswd_expected_wchlink_family);
     uint32_t option_status;
+    uint8_t ch5xx_chip_id;
 
+    if (rvswd_gpio_read_memory8_ch5xx(RVSWD_CH5XX_CHIP_ID_ADDRESS,
+                                      &ch5xx_chip_id) &&
+        (ch5xx_chip_id == RVSWD_CH5XX_CHIP_ID_CH582 ||
+         ch5xx_chip_id == RVSWD_CH5XX_CHIP_ID_CH583 ||
+         ch5xx_chip_id == RVSWD_CH5XX_CHIP_ID_CH591 ||
+         ch5xx_chip_id == RVSWD_CH5XX_CHIP_ID_CH592)) {
+        // CH5xx 通过专用 8 位寄存器报告型号，协议层使用 family 高字节形式
+        rvswd_target_chip_id = (uint32_t)ch5xx_chip_id << 24u;
+        // 连接阶段只确认目标身份，Flash 命令口在实际擦除流程中单独解锁
+        return true;
+    }
     if (rvswd_gpio_read_memory32(0x1ffff704u, &rvswd_target_chip_id) &&
         rvswd_target_chip_id != 0u) {
         return true;
