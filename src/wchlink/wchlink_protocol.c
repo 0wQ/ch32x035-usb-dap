@@ -5,6 +5,7 @@
 #include "bsp/bsp_delay.h"
 #include "drv/drv_dp_pullup.h"
 #include "drv/drv_power_switch.h"
+#include "wchlink_family.h"
 #include "rvswd_gpio.h"
 
 #define WCHLINK_COMMAND_PREFIX 0x81u
@@ -13,9 +14,6 @@
 #define WCHLINK_FAMILY_RESET   0x0bu
 #define WCHLINK_FAMILY_SPEED   0x0cu
 #define WCHLINK_FAMILY_CONTROL 0x0du
-#define WCHLINK_TARGET_FAMILY_CH59X 0x0bu
-#define WCHLINK_TARGET_FAMILY_CH58X 0x07u
-#define WCHLINK_TARGET_FAMILY_L103 0x0eu
 #define WCHLINK_FAMILY_INFO    0x11u
 #define WCHLINK_FAMILY_DMI     0x08u
 #define WCHLINK_FAMILY_CONFIG  0x06u

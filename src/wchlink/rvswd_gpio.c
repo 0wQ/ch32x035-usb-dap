@@ -1,6 +1,7 @@
 #include "rvswd_gpio.h"
 
 #include "bsp/bsp_delay.h"
+#include "wchlink_family.h"
 
 #include <stddef.h>
 
@@ -90,12 +91,6 @@
 #define RVSWD_OPTION_RDP_UNPROTECTED    0x5aa5u
 #define RVSWD_FLASH_ERASE_TIMEOUT_US    6000000u
 
-#define RVSWD_WCHLINK_FAMILY_V30X 0x06u
-#define RVSWD_WCHLINK_FAMILY_CH59X 0x0bu
-#define RVSWD_WCHLINK_FAMILY_CH58X 0x07u
-#define RVSWD_WCHLINK_FAMILY_X035 0x0du
-#define RVSWD_WCHLINK_FAMILY_L103 0x0eu
-
 enum rvswd_flash_unlock_mode {
     RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
     RVSWD_FLASH_UNLOCK_MAIN_OPTION_AND_FAST,
@@ -115,7 +110,7 @@ struct rvswd_target_profile {
 };
 
 static const struct rvswd_target_profile rvswd_target_profile_x035 = {
-    .wchlink_family = RVSWD_WCHLINK_FAMILY_X035,
+    .wchlink_family = WCHLINK_TARGET_FAMILY_X035,
     .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
@@ -123,7 +118,7 @@ static const struct rvswd_target_profile rvswd_target_profile_x035 = {
 };
 
 static const struct rvswd_target_profile rvswd_target_profile_l103 = {
-    .wchlink_family = RVSWD_WCHLINK_FAMILY_L103,
+    .wchlink_family = WCHLINK_TARGET_FAMILY_L103,
     .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_OPTION_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_FAST_BUFFER,
@@ -131,7 +126,7 @@ static const struct rvswd_target_profile rvswd_target_profile_l103 = {
 };
 
 static const struct rvswd_target_profile rvswd_target_profile_v30x = {
-    .wchlink_family = RVSWD_WCHLINK_FAMILY_V30X,
+    .wchlink_family = WCHLINK_TARGET_FAMILY_V30X,
     .ch5xx_protocol = false,
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
     .option_write = RVSWD_OPTION_WRITE_HALFWORD,
@@ -139,7 +134,7 @@ static const struct rvswd_target_profile rvswd_target_profile_v30x = {
 };
 
 static const struct rvswd_target_profile rvswd_target_profile_ch59x = {
-    .wchlink_family = RVSWD_WCHLINK_FAMILY_CH59X,
+    .wchlink_family = WCHLINK_TARGET_FAMILY_CH59X,
     .ch5xx_protocol = true,
     // CH5xx 使用专用 Flash 命令和 loader，这两个字段只为保持 profile 接口完整
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
@@ -148,7 +143,7 @@ static const struct rvswd_target_profile rvswd_target_profile_ch59x = {
 };
 
 static const struct rvswd_target_profile rvswd_target_profile_ch58x = {
-    .wchlink_family = RVSWD_WCHLINK_FAMILY_CH58X,
+    .wchlink_family = WCHLINK_TARGET_FAMILY_CH58X,
     .ch5xx_protocol = true,
     // CH58x 使用专用 Flash 命令和 loader，这两个字段只为保持 profile 接口完整
     .erase_unlock = RVSWD_FLASH_UNLOCK_MAIN_AND_FAST,
@@ -201,15 +196,15 @@ static const struct rvswd_target_profile *rvswd_gpio_profile_from_chip_id(
 static const struct rvswd_target_profile *rvswd_gpio_profile_from_wchlink_family(
     uint8_t family) {
     switch (family) {
-        case RVSWD_WCHLINK_FAMILY_X035:
+        case WCHLINK_TARGET_FAMILY_X035:
             return &rvswd_target_profile_x035;
-        case RVSWD_WCHLINK_FAMILY_L103:
+        case WCHLINK_TARGET_FAMILY_L103:
             return &rvswd_target_profile_l103;
-        case RVSWD_WCHLINK_FAMILY_V30X:
+        case WCHLINK_TARGET_FAMILY_V30X:
             return &rvswd_target_profile_v30x;
-        case RVSWD_WCHLINK_FAMILY_CH59X:
+        case WCHLINK_TARGET_FAMILY_CH59X:
             return &rvswd_target_profile_ch59x;
-        case RVSWD_WCHLINK_FAMILY_CH58X:
+        case WCHLINK_TARGET_FAMILY_CH58X:
             return &rvswd_target_profile_ch58x;
         default:
             return NULL;
@@ -760,9 +755,9 @@ bool rvswd_gpio_read_memory32(uint32_t address, uint32_t *value) {
             rvswd_gpio_profile_from_wchlink_family(rvswd_expected_wchlink_family);
     }
     if (profile != NULL &&
-        (profile->wchlink_family == RVSWD_WCHLINK_FAMILY_L103 ||
-         profile->wchlink_family == RVSWD_WCHLINK_FAMILY_CH58X ||
-         profile->wchlink_family == RVSWD_WCHLINK_FAMILY_CH59X)) {
+        (profile->wchlink_family == WCHLINK_TARGET_FAMILY_L103 ||
+         profile->wchlink_family == WCHLINK_TARGET_FAMILY_CH58X ||
+         profile->wchlink_family == WCHLINK_TARGET_FAMILY_CH59X)) {
         return rvswd_gpio_read_memory32_synchronized(address, value);
     }
     if (rvswd_gpio_read_memory32_v30x(address, value)) {
