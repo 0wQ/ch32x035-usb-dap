@@ -124,12 +124,12 @@ ChipID `0x10320710`，并报告 `Flash protected: false`。这验证了 L103 的
 断电和重新上电。以下闭环已通过：
 
 ```text
-tools/wlink_ours.sh --chip CH32X035 protect
-tools/wlink_ours.sh set-power restart5v
-tools/wlink_ours.sh --chip CH32X035 status
-tools/wlink_ours.sh --chip CH32X035 unprotect
-tools/wlink_ours.sh set-power restart5v
-tools/wlink_ours.sh --chip CH32X035 status
+tools/wchlink/wlink_ours.sh --chip CH32X035 protect
+tools/wchlink/wlink_ours.sh set-power restart5v
+tools/wchlink/wlink_ours.sh --chip CH32X035 status
+tools/wchlink/wlink_ours.sh --chip CH32X035 unprotect
+tools/wchlink/wlink_ours.sh set-power restart5v
+tools/wchlink/wlink_ours.sh --chip CH32X035 status
 ```
 
 保护后断电回读为 `Flash protected: true`，解除后再次断电回读恢复 ChipID
@@ -139,12 +139,12 @@ tools/wlink_ours.sh --chip CH32X035 status
 `PA2=SWCLK`、`PA3=SWDIO`，SWDIO 外接 `4.7 kOhm` 上拉。以下闭环已通过：
 
 ```text
-tools/wlink_ours.sh --chip CH32V30X status
-tools/wlink_ours.sh --chip CH32V30X protect
-tools/wlink_ours.sh --chip CH32V30X status
-tools/wlink_ours.sh --chip CH32V30X unprotect
-tools/wlink_ours.sh --chip CH32V30X status
-tools/wlink_ours.sh --chip CH32V30X dump 0x08000000 294912
+tools/wchlink/wlink_ours.sh --chip CH32V30X status
+tools/wchlink/wlink_ours.sh --chip CH32V30X protect
+tools/wchlink/wlink_ours.sh --chip CH32V30X status
+tools/wchlink/wlink_ours.sh --chip CH32V30X unprotect
+tools/wchlink/wlink_ours.sh --chip CH32V30X status
+tools/wchlink/wlink_ours.sh --chip CH32V30X dump 0x08000000 294912
 ```
 
 初始状态识别 ChipID `0x30700528`，报告 `Flash protected: false`。保护后新会话只返回

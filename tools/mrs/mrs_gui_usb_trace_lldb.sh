@@ -3,9 +3,10 @@
 set -eu
 
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-trace_script="$script_directory/mrs_gui_usb_trace.lldb"
-log_path="${1:-$script_directory/../build/tools/mrs_gui_usb_trace_lldb.log}"
-profile_path="$script_directory/../.tmp/mrs-debug-profile"
+project_directory=$(CDPATH= cd -- "$script_directory/../.." && pwd)
+trace_script="$script_directory/lldb/mrs_gui_usb_trace.lldb"
+log_path="${1:-$project_directory/build/tools/mrs_gui_usb_trace_lldb.log}"
+profile_path="$project_directory/.tmp/mrs-debug-profile"
 
 target_pid=$(ps -axo pid=,args= |
     awk -v profile="$profile_path"

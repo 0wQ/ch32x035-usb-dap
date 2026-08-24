@@ -3,9 +3,10 @@
 set -eu
 
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_directory=$(CDPATH= cd -- "$script_directory/../.." && pwd)
 app_path="/Applications/MounRiver Studio 2.app"
-trace_path="$script_directory/../build/tools/mrs_usb_trace.dylib"
-log_path="${1:-$script_directory/../build/tools/mrs_gui_usb_trace.log}"
+trace_path="$project_directory/build/tools/mrs_usb_trace.dylib"
+log_path="${1:-$project_directory/build/tools/mrs_gui_usb_trace.log}"
 
 if [ ! -x "$app_path/Contents/MacOS/Electron" ]; then
     printf '找不到 MounRiver Studio: %s\\n' "$app_path" >&2

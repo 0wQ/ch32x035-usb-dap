@@ -49,7 +49,7 @@ Debug 0.13.2 中的 `dmireset` 属于 JTAG DTM，不是 WCH RVSWD short-frame �
 
 ## 波形基线
 
-`captures/wch-linke-v2.19-ch32v307-status-20260818.csv` 是真实 WCH-LinkE 对 CH32V307 执行状态查询的导出。它用于：
+`../../../../wch-linke-captures/CH32V307/20260818__official-linke-v2.19__status/raw.csv` 是真实 WCH-LinkE 对 CH32V307 执行状态查询的导出。它用于：
 
 - 验证空闲电平、START/STOP、时钟相位和读写字段
 - 验证当前采集数据能被 Sigrok decoder 解析为合理帧

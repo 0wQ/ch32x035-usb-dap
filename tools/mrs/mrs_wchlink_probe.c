@@ -31,6 +31,7 @@ typedef int (*set_mem_type_fn)(int, int, int);
 typedef int (*get_device_mode_fn)(void);
 typedef int (*disable_debug_fn)(int, int);
 typedef int (*get_chip_id_fn)(void);
+typedef int (*opt_33v_out_fn)(int);
 typedef void (*set_location_fn)(const char *);
 
 struct mrs_api {
@@ -59,6 +60,7 @@ struct mrs_api {
     get_device_mode_fn get_device_mode;
     disable_debug_fn disable_debug;
     get_chip_id_fn get_chip_id;
+    opt_33v_out_fn opt_33v_out;
     set_location_fn set_location;
 };
 
@@ -74,6 +76,12 @@ static const int default_family = 6;
 static const int default_speed = 3;
 static const int default_address = 0x08000000;
 static bool skip_chip_info_query;
+static const char *selected_location;
+
+enum power_3v3_state {
+    POWER_3V3_DISABLED = 0,
+    POWER_3V3_ENABLED = 1,
+};
 
 static void print_usage(const char *program) {
     fprintf(stderr,
@@ -83,6 +91,10 @@ static void print_usage(const char *program) {
             "           [--family N] [--debug-mode N]\n"
             "  %s check [--library PATH] [--serial SERIAL] [--location BUS-PORT]\n"
             "           [--family N] [--debug-mode N] [--speed N]\n"
+            "  %s attach [--library PATH] [--serial SERIAL] [--location BUS-PORT]\n"
+            "           [--family N] [--debug-mode N] [--speed N]\n"
+            "  %s power-3v3 enable|disable [--library PATH] [--serial SERIAL]\n"
+            "           [--location BUS-PORT]\n"
             "  %s flash --file PATH [--flags N] [--address N] [--library PATH]\n"
             "           [--serial SERIAL] [--location BUS-PORT] [--family N]\n"
             "           [--debug-mode N] [--speed N]\n"
@@ -111,7 +123,7 @@ static void print_usage(const char *program) {
             "default serial: %s\n"
             "default flash flags: 0x06 (program + verify)\n",
             program, program, program, program, program, program, program, program, program,
-            program, program, program, program, program, program, program,
+            program, program, program, program, program, program, program, program, program,
             default_serial);
 }
 
@@ -170,6 +182,7 @@ static bool load_api(struct mrs_api *api, const char *path) {
     LOAD("McuCompiler_GetDeviceMode", get_device_mode)
     LOAD("MRSFunc_DisableDbgInterface", disable_debug)
     LOAD("MRSFunc_GetLinkedMCUID", get_chip_id)
+    LOAD("McuCompiler_Opt33VOut", opt_33v_out)
 #undef LOAD
 
     api->set_location = (set_location_fn)dlsym(api->library, "jtag_usb_set_location");
@@ -398,6 +411,16 @@ static int run_check(struct mrs_api *api, int family, int debug_mode, int speed)
     return 0;
 }
 
+static int run_attach(struct mrs_api *api, int family, int debug_mode, int speed) {
+    uint8_t subtype = 0u;
+    int result = open_and_configure(api, family, debug_mode, speed, &subtype);
+
+    printf("attach_result=%d subtype=0x%02x\n", result, subtype);
+    api->close_device();
+    printf("close=0\n");
+    return result;
+}
+
 // 复现 MRS 下载前的型号选择和固件版本判定，不执行目标芯片操作
 static int run_configured_gui_preflight(struct mrs_api *api, int family, int debug_mode) {
     int result = api->set_target_chip(family, debug_mode);
@@ -426,18 +449,40 @@ static int run_linked_id(struct mrs_api *api) {
     return 0;
 }
 
+static int run_power_3v3(struct mrs_api *api, enum power_3v3_state state) {
+    int link_type = 0;
+    int link_mode = 0;
+    int result = api->open_device();
+
+    printf("open=%d\n", result);
+    if (result != 0) {
+        return result;
+    }
+    // Opt33VOut 依赖 GetDeviceVersion 保存的 Link 类型，省略该查询会直接返回 100
+    result = api->get_device_version(&link_type, &link_mode);
+    printf("get_device_version=%d type=%d mode=%d\n", result, link_type, link_mode);
+    // MRS 以 bit 0 控制 WCH-LinkE 3V3 输出，1 为使能，0 为关闭
+    result = api->opt_33v_out((int)state);
+    printf("opt_33v_out(%d)=%d\n", (int)state, result);
+    api->close_device();
+    printf("close=0\n");
+    return result;
+}
+
 int main(int argc, char **argv) {
     const char *command;
     const char *library_path = default_library_path;
     const char *location = default_location;
     const char *serial = default_serial;
     const char *file_path = NULL;
+    const char *power_state_name = NULL;
     int family = default_family;
     int debug_mode = 1;
     int speed = default_speed;
     int address = default_address;
     int flags = 0x06;
     int clear_type = 0;
+    int first_option_index = 2;
     struct mrs_api api;
     int result;
 
@@ -450,7 +495,20 @@ int main(int argc, char **argv) {
         print_usage(argv[0]);
         return 0;
     }
-    for (int index = 2; index < argc; ++index) {
+    if (strcmp(command, "power-3v3") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "power-3v3 requires enable or disable\n");
+            return 2;
+        }
+        power_state_name = argv[2];
+        first_option_index = 3;
+        if (strcmp(power_state_name, "enable") != 0 &&
+            strcmp(power_state_name, "disable") != 0) {
+            fprintf(stderr, "power-3v3 state must be enable or disable\n");
+            return 2;
+        }
+    }
+    for (int index = first_option_index; index < argc; ++index) {
         if (strcmp(argv[index], "--file") == 0) {
             if (++index >= argc) {
                 fprintf(stderr, "--file requires a value\n");
@@ -506,12 +564,14 @@ int main(int argc, char **argv) {
                strcmp(command, "reset") != 0 &&
                strcmp(command, "erase") != 0 &&
                strcmp(command, "check") != 0 &&
+               strcmp(command, "attach") != 0 &&
                strcmp(command, "protect-enable") != 0 && strcmp(command, "protect-disable") != 0 &&
                strcmp(command, "flash-dap") != 0 && strcmp(command, "flash-external") != 0 &&
                strcmp(command, "erase-dap") != 0 && strcmp(command, "flash-linked") != 0 &&
                strcmp(command, "flash-open") != 0 && strcmp(command, "flash-gui") != 0 &&
                strcmp(command, "flash-basic") != 0 &&
-               strcmp(command, "linked-id") != 0) {
+               strcmp(command, "linked-id") != 0 &&
+               strcmp(command, "power-3v3") != 0) {
         fprintf(stderr, "unknown command: %s\n", command);
         print_usage(argv[0]);
         return 2;
@@ -539,6 +599,7 @@ int main(int argc, char **argv) {
         }
     }
     printf("serial=%s\n", serial);
+    selected_location = location;
     if (location != NULL && api.set_location != NULL) {
         api.set_location(location);
         printf("location=%s\n", location);
@@ -558,6 +619,21 @@ int main(int argc, char **argv) {
 
     if (strcmp(command, "check") == 0) {
         result = run_check(&api, family, debug_mode, speed);
+        unload_api(&api);
+        return result == 0 ? 0 : 1;
+    }
+
+    if (strcmp(command, "attach") == 0) {
+        result = run_attach(&api, family, debug_mode, speed);
+        unload_api(&api);
+        return result == 0 ? 0 : 1;
+    }
+
+    if (strcmp(command, "power-3v3") == 0) {
+        enum power_3v3_state state = strcmp(power_state_name, "enable") == 0
+                                         ? POWER_3V3_ENABLED
+                                         : POWER_3V3_DISABLED;
+        result = run_power_3v3(&api, state);
         unload_api(&api);
         return result == 0 ? 0 : 1;
     }

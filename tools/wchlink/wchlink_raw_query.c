@@ -4,7 +4,41 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int run_query(const char *serial, const char *operation) {
+#define PARTIAL_WRITE_DATA_LENGTH 4u
+
+static int hex_nibble(char character) {
+    if (character >= '0' && character <= '9') {
+        return character - '0';
+    }
+    if (character >= 'a' && character <= 'f') {
+        return character - 'a' + 10;
+    }
+    if (character >= 'A' && character <= 'F') {
+        return character - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool parse_partial_write_data(const char *text,
+                                     unsigned char data[PARTIAL_WRITE_DATA_LENGTH]) {
+    if (strlen(text) != PARTIAL_WRITE_DATA_LENGTH * 2u) {
+        return false;
+    }
+    for (size_t index = 0u; index < PARTIAL_WRITE_DATA_LENGTH; ++index) {
+        int high = hex_nibble(text[index * 2u]);
+        int low = hex_nibble(text[index * 2u + 1u]);
+
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        data[index] = (unsigned char)((high << 4u) | low);
+    }
+    return true;
+}
+
+static int run_query(const char *serial, const char *operation,
+                     unsigned char partial_write_family,
+                     const unsigned char partial_write_data[PARTIAL_WRITE_DATA_LENGTH]) {
     libusb_context *context = NULL;
     libusb_device **devices = NULL;
     libusb_device_handle *handle = NULL;
@@ -16,10 +50,12 @@ static int run_query(const char *serial, const char *operation) {
     unsigned char iap_mode_request[] = {0x81, 0x0f, 0x01, 0x01};
     unsigned char chip_info_request[] = {0x81, 0x11, 0x01, 0x0b};
     unsigned char speed_request[] = {0x81, 0x0c, 0x02, 0x0b, 0x03};
+    unsigned char partial_write_speed_request[] = {0x81, 0x0c, 0x02, 0x07, 0x03};
     unsigned char erase_request[] = {0x81, 0x0d, 0x02, 0x08, 0x0b};
     unsigned char set_chip_type_request[] = {0x81, 0x0d, 0x01, 0x04};
     unsigned char read_protection_request[] = {0x81, 0x06, 0x01, 0x01};
     unsigned char basic_erase_request[] = {0x81, 0x02, 0x01, 0x01};
+    unsigned char partial_write_request[] = {0x81, 0x0a, 0x05, 0x00, 0x00, 0x0a, 0xac, 0x04};
     unsigned char *requests[7] = {chip_info_request};
     int request_lengths[7] = {sizeof(chip_info_request)};
     size_t request_count = 1u;
@@ -27,12 +63,16 @@ static int run_query(const char *serial, const char *operation) {
     bool identify_loop = false;
     bool mrs_connect_read = false;
     bool mrs_clear_sequence = false;
+    bool partial_write = strcmp(operation, "partial-write") == 0;
     bool no_response = strcmp(operation, "iap-mode") == 0;
     unsigned char response[64] = {0};
     unsigned int timeout = 3000u;
     int transferred = 0;
     int result = 1;
     ssize_t count;
+
+    // 0x0A 测试必须先按实际目标族选择 RVSWD 传输格式，默认保留 CH582 的 long-frame 提示
+    partial_write_speed_request[3] = partial_write_family;
 
     if (strcmp(operation, "identify") == 0) {
         requests[0] = identify_request;
@@ -128,6 +168,16 @@ static int run_query(const char *serial, const char *operation) {
         request_lengths[6] = sizeof(stop_request);
         request_count = 7u;
         mrs_clear_sequence = true;
+    } else if (partial_write) {
+        requests[0] = identify_request;
+        requests[1] = partial_write_speed_request;
+        requests[2] = connect_request;
+        requests[3] = partial_write_request;
+        request_lengths[0] = sizeof(identify_request);
+        request_lengths[1] = sizeof(speed_request);
+        request_lengths[2] = sizeof(connect_request);
+        request_lengths[3] = sizeof(partial_write_request);
+        request_count = 4u;
     } else if (strcmp(operation, "chip-info") != 0) {
         fprintf(stderr, "unknown operation: %s\n", operation);
         return 2;
@@ -230,6 +280,28 @@ static int run_query(const char *serial, const char *operation) {
                        index + 1 == transferred ? "\n" : " ");
             }
         }
+        if (partial_write && request_index == request_count - 1u) {
+            transfer_result = libusb_bulk_transfer(
+                handle, 0x02u, (unsigned char *)partial_write_data,
+                PARTIAL_WRITE_DATA_LENGTH,
+                &transferred, timeout);
+            printf("partial_data_result=%d transferred=%d\n", transfer_result,
+                   transferred);
+            transfer_result = libusb_bulk_transfer(
+                handle, 0x82u, response, sizeof(response), &transferred,
+                timeout);
+            printf("partial_response_result=%d transferred=%d\n",
+                   transfer_result, transferred);
+            if (transfer_result == 0) {
+                printf("partial_response=");
+                for (int index = 0; index < transferred; ++index) {
+                    printf("%02x%s", response[index],
+                           index + 1 == transferred ? "\n" : " ");
+                }
+            }
+            result = transfer_result == 0 ? 0 : 1;
+            goto release;
+        }
     }
     if (identify_loop) {
         printf("identify_responses=%zu\n", request_count);
@@ -247,10 +319,42 @@ finish:
     return result;
 }
 
+static void print_usage(const char *program) {
+    fprintf(stderr,
+            "usage: %s SERIAL [identify|identify-three|identify-loop|soft-reset|connect-soft-reset|debugger-mode|iap-mode|read-only|partial-write|stale-identify|chip-info|erase|mrs-erase|set-chip-type|mrs-sequence|mrs-connect-20|mrs-clear-sequence] [partial-family] [partial-data-hex]\n",
+            program);
+}
+
 int main(int argc, char **argv) {
-    if (argc != 2 && argc != 3) {
-        fprintf(stderr, "usage: %s SERIAL [identify|identify-three|identify-loop|soft-reset|connect-soft-reset|debugger-mode|iap-mode|read-only|stale-identify|chip-info|erase|mrs-erase|set-chip-type|mrs-sequence|mrs-connect-20|mrs-clear-sequence]\n", argv[0]);
+    const char *operation;
+    unsigned long family = 0x07u;
+    unsigned char partial_write_data[PARTIAL_WRITE_DATA_LENGTH] = {0x73, 0x00, 0x10, 0x00};
+    char *end = NULL;
+
+    if (argc == 2 && (strcmp(argv[1], "--help") == 0 ||
+                      strcmp(argv[1], "-h") == 0)) {
+        print_usage(argv[0]);
+        return 0;
+    }
+    if (argc < 2 || argc > 5) {
+        print_usage(argv[0]);
         return 2;
     }
-    return run_query(argv[1], argc == 3 ? argv[2] : "chip-info");
+    operation = argc >= 3 ? argv[2] : "chip-info";
+    if (argc >= 4) {
+        family = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' || family > 0xffu) {
+            fprintf(stderr, "invalid partial-family: %s\n", argv[3]);
+            return 2;
+        }
+        if (strcmp(operation, "partial-write") != 0) {
+            fprintf(stderr, "partial-family only applies to partial-write operations\n");
+            return 2;
+        }
+    }
+    if (argc == 5 && !parse_partial_write_data(argv[4], partial_write_data)) {
+        fprintf(stderr, "partial-data-hex must contain exactly 8 hexadecimal digits\n");
+        return 2;
+    }
+    return run_query(argv[1], operation, (unsigned char)family, partial_write_data);
 }

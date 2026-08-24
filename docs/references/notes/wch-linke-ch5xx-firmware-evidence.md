@@ -140,14 +140,14 @@ sha256: f064d29df60d7a786976b5740c14a63c585d871d54a2a0de8c091cc99e101b69
 项目探针连接 CH592 后，以下只读命令通过：
 
 ```text
-./tools/wlink_ours.sh status
+./tools/wchlink/wlink_ours.sh status
 Attached chip: CH59X [CH592] (ChipID: 0x92000000)
 authenticated: true
 allhalted: true
 cmderr: 0x0
 progbufsize: 0x8
 
-./tools/wlink_ours.sh dump 0x00000000 256
+./tools/wchlink/wlink_ours.sh dump 0x00000000 256
 Read memory from 0x00000000 to 0x00000100
 ```
 
@@ -164,14 +164,14 @@ SHA-256：25e32b2a4601e008eced2505488fb908b2fb40e484228da4ff3f2098c4740061
 使用项目探针 Serial `035CDAB8706E` 完成以下实板步骤，每次操作前均重新执行 `wlink list`：
 
 ```text
-./tools/wlink_ours.sh erase
+./tools/wchlink/wlink_ours.sh erase
 Erase done
 ```
 
 擦除后直接回读会得到重复的 `a9 bd f9 f3`，这是 wlink 对 CH59x“刚进入调试模式、代码区尚未写入有效固件”的无效代码标记，不应按全 `0xff` 判断擦除结果。该结果同时确认擦除前的应用向量表已消失
 
 ```text
-./tools/wlink_ours.sh -vv flash -R .../firmware.bin
+./tools/wchlink/wlink_ours.sh -vv flash -R .../firmware.bin
 write data ep total 1326 bytes
 recv data 41010104
 Fastprogram done
@@ -187,7 +187,7 @@ cmp=match
 25e32b2a4601e008eced2505488fb908b2fb40e484228da4ff3f2098c4740061  program-readback.bin
 ```
 
-最后执行 `./tools/wlink_ours.sh reset` 后再次 `status`，得到 `CH59X [CH592]`、`allhavereset=true`、`allhalted=true`、`authenticated=true`、`allresumeack=true`、`cmderr=0x0`。这完成了 CH592 的全擦、loader 接收与两次初始化、编程、校验、严格回读和复位连接闭环
+最后执行 `./tools/wchlink/wlink_ours.sh reset` 后再次 `status`，得到 `CH59X [CH592]`、`allhavereset=true`、`allhalted=true`、`authenticated=true`、`allresumeack=true`、`cmderr=0x0`。这完成了 CH592 的全擦、loader 接收与两次初始化、编程、校验、严格回读和复位连接闭环
 
 随后使用 MounRiver OpenOCD 发行版和 RISC-V GDB 做连续调试验证。由于官方 LinkE 和项目探针同时连接，OpenOCD 通过 `wlink_set_index 1` 选择项目探针 Serial `035CDAB8706E`，配置和工具路径如下：
 

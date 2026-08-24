@@ -3,8 +3,9 @@
 set -eu
 
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_directory=$(CDPATH= cd -- "$script_directory/../.." && pwd)
 source_app="/Applications/MounRiver Studio 2.app"
-target_app="$script_directory/../.tmp/MounRiver Studio 2 Debug.app"
+target_app="$project_directory/.tmp/MounRiver Studio 2 Debug.app"
 entitlements_path="$script_directory/mrs_debug.entitlements.plist"
 plugin_binary="$target_app/Contents/Frameworks/MounRiver Studio 2 Helper (Plugin).app/Contents/MacOS/MounRiver Studio 2 Helper (Plugin)"
 

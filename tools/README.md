@@ -1,18 +1,23 @@
-# WCH-Link 动态库探针
+# 开发工具
 
-`mrs_wchlink_probe` 通过 MounRiver Studio 的 `libmcuupdate.dylib` 调用真实的
-WCH-Link 通讯接口，用于复现 MRS 的只读查询、擦除、编程、校验和保护操作。
+`tools/` 按执行对象组织。根目录只保留本索引，避免 MRS 调试、WCH-Link 协议和 CDC/UART
+测试脚本混在一起。
 
-## 构建
+| 目录 | 内容 | 主要入口 |
+| --- | --- | --- |
+| [`mrs/`](mrs/) | MRS 动态库探针、GUI 注入和 LLDB 跟踪 | `build_mrs_wchlink_probe.sh`、`mrs_gui_usb_trace.sh` |
+| [`wchlink/`](wchlink/) | 项目 WCH-Link、ISP 和原始协议诊断 | `wlink_ours.sh`、`wchlink_enter_iap.sh` |
+| [`transport/`](transport/) | CDC/UART 收发、ESP32 协议仿真和 USBFS 基准 | `usb_cdc_loopback_test.py`、`usbfs_port_benchmark_prototype.py` |
+
+## MRS
+
+构建 MRS 动态库探针和 USB trace：
 
 ```sh
-sh tools/build_mrs_wchlink_probe.sh
+sh tools/mrs/build_mrs_wchlink_probe.sh
 ```
 
-产物为 `build/tools/mrs_wchlink_probe`。构建依赖 Homebrew 的 `libusb`，运行时
-需要本机已安装 MounRiver Studio 2。
-
-## 常用命令
+产物位于 `build/tools/`，常用命令为：
 
 ```sh
 build/tools/mrs_wchlink_probe check
@@ -23,81 +28,49 @@ build/tools/mrs_wchlink_probe protect-enable
 build/tools/mrs_wchlink_probe protect-disable
 ```
 
-CH32V307 默认参数为 `--family 6 --debug-mode 1 --speed 3`。其中 `debug-mode 1`
-表示双线调试，`speed 3` 是 MRS 的两线速度参数，两者含义不同。
+可通过 `--serial`、`--location`、`--family`、`--debug-mode`、`--speed`、`--address`、
+`--flags` 和 `--clear-type` 固定目标和 MRS 参数。多个同 VID/PID WCH-Link 同时连接时，
+优先指定完整序列号，必要时断开无关设备。
 
-可以通过以下参数覆盖设备和目标设置：
-
-```text
---serial SERIAL
---location BUS-PORT
---family N
---debug-mode N
---speed N
---address N
---flags N
---clear-type N
-```
-
-未指定 `--serial` 时默认选择序列号以 `035` 开头的本项目探针，完整序列号仍可通过 `--serial` 精确指定
-
-工具优先按 USB 序列号解析物理位置，并调用 `jtag_usb_set_location`。macOS 的
-DriverKit USB 设备可能被 Homebrew libusb 枚举不到，此时工具仅在 MRS 自身选择
-设备，多个同 VID/PID 设备同时连接时应先断开无关设备。
-
-## MRS 调用顺序
-
-`check` 命令复现 MRS 中显式调用的顺序：
-
-1. `McuCompiler_SetTargetChip(family, debug_mode)`
-2. `McuCompiler_OpenDevice()`
-3. `McuCompiler_GetDeviceVersion()`
-4. `McuCompiler_SetTwolineLowSpeed(family, speed)`
-5. `McuCompiler_SetChipType(family, subtype, false)`
-6. 调用具体的 `MRSFunc_*` 操作
-
-MRS 的 `SetChipType` 实际先发送 `81 0d 01 04`。手动检查使用 `skip=false`，随后会
-发送 `81 11 01 <family>` 查询扩展信息。官方 LinkE 连接 CH592 时，对该查询返回：
-
-```text
-82 0d 01 ff 92 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-```
-
-`MRSFunc_FlashOperationExB` 是 MRS 编程主路径，但普通目标族分支会转入
-`MRSFunc_FlashOperation`，再以 `skip=false` 调用 `McuCompiler_SetChipType`，要求
-完整 20 字节扩展信息。CH59x 必须按官方 LinkE 的专用格式回复，不能套用其他芯片族的
-4 字节拒绝帧
-
-`flash` 使用 `MRSFunc_FlashOperationExB`，默认 flags `0x06`，即编程和校验。
-`verify` 使用同一入口但只保留校验标志。CH59x 工程的普通全擦、编程、校验和复位
-使用 `--flags 0x0f`。
-
-`MRSFunc_FlashOperationExB` 的 flags 定义如下：
-
-```text
-0x80 关闭 Link 电源输出
-0x40 掉电方式清 CodeFlash
-0x20 解除读保护
-0x10 OptEnd
-0x08 McuCompiler_Clear
-0x04 编程
-0x02 校验
-0x01 复位并运行
-```
-
-## 进入 CH32X035 USB ISP
-
-模拟 Link 也接受官方 LinkE 的 `81 0f 01 01` SetIAPMode 触发。该命令只负责退出
-WCH-Link 工作态，固件随后进入自身 CH32X035 的 USB ISP，后续镜像传输仍使用
-`wchisp`，不是官方 LinkE IAP 数据协议：
+`mrs/lldb/` 保存所有 LLDB 断点脚本。创建带调试权限的 MRS 副本后，可使用：
 
 ```sh
-sh tools/wchlink_enter_iap.sh 035CDAB8706E
+sh tools/mrs/create_mrs_debug_copy.sh
+sh tools/mrs/mrs_gui_usb_trace.sh
+sh tools/mrs/mrs_gui_usb_trace_lldb.sh
 ```
 
-脚本会在 10 秒窗口内自动重试 `wchisp flash`，也可以把第二个参数换成指定镜像路径
+## WCH-Link
 
-CDC-ACM 只保留数据回环，不触发 ISP，`WCHISP` 字节会按普通 CDC 数据原样回显
+`wlink_ours.sh` 按项目探针序列号前缀选择设备，适合项目探针的手工诊断和第三方交叉参考，
+不作为 RVSWD 协议采样的执行器：
 
-该入口只影响模拟 Link 自身，不会操作 SWD 目标芯片。发送命令前应关闭 MRS、OpenOCD
-和 `wlink`，避免它们占用同一个 USB CDC 或 WCH-Link 设备
+```sh
+tools/wchlink/wlink_ours.sh --chip CH582 --speed low status
+tools/wchlink/wlink_ours.sh dump --chip CH582 0x0a00 256 --out target.bin
+```
+
+项目固件维护使用官方 SetIAPMode 进入 CH32X035 USB ISP，随后在 10 秒窗口内写入新固件：
+
+```sh
+sh tools/wchlink/wchlink_enter_iap.sh 035CDAB8706E
+```
+
+RVSWD Logic 抓包、CSV 分类和原始采样归档已移到相邻的
+[`wch-linke-captures`](../../../wch-linke-captures/)。其运行器仍调用本工程构建的
+`build/tools/mrs_wchlink_probe` 和 MRS 自带 OpenOCD，但运行记录、CSV 与临时页镜像不写回本工程。
+
+## 传输测试
+
+`transport/` 中的脚本可直接从项目根目录执行。它们共享
+`usb_cdc_loopback_test.py` 的串口配置和字节校验逻辑：
+
+```sh
+python3 tools/transport/usb_cdc_loopback_test.py /dev/cu.usbmodem...
+python3 tools/transport/usb_uart_duplex_test.py /dev/cu.usbmodem... /dev/cu.usbserial...
+python3 tools/transport/uart_full_duplex_test.py /dev/cu.usbmodem... /dev/cu.usbserial...
+```
+
+`esp32s3_flash_pattern_test.py` 用外部 UART 模拟 ESP32-S3 烧录交互；
+`usbfs_port_benchmark_prototype.py` 会临时构建和刷入测试固件，除非传入
+`--keep-benchmark-firmware`，否则结束时恢复正式固件配置。

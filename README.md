@@ -77,7 +77,7 @@ xmake -r
 
 固件维护时通过 `81 0f 01 01` 官方 SetIAPMode 命令进入 CH32X035 Boot 区，随后在约
 10 秒 USB ISP 窗口内使用 `wchisp` 烧录自身固件，入口脚本会自动完成触发和重试。
-入口脚本为 `tools/wchlink_enter_iap.sh`，CDC 端口仅执行回环
+入口脚本为 `tools/wchlink/wchlink_enter_iap.sh`，CDC 端口仅执行回环
 
 ## 设备选择
 
@@ -102,7 +102,7 @@ wlink --device 1 status
 构建 MRS 动态库探针和 USB trace：
 
 ```sh
-sh tools/build_mrs_wchlink_probe.sh
+sh tools/mrs/build_mrs_wchlink_probe.sh
 ```
 
 常用命令：
@@ -152,6 +152,6 @@ openocd \
 - `src/wchlink/wchlink_usb.c`：USB 描述符、端点和请求生命周期
 - `src/wchlink/wchlink_protocol.c`：WCH-Link 命令解析和响应
 - `src/wchlink/rvswd_gpio.c`：52 位 RVSWD direct-DMI 和目标访问
-- `tools/mrs_wchlink_probe.c`：MRS 动态库调用探针
-- `tools/mrs_usb_trace.c`：libusb 调用跟踪层
-- `tools/wlink_ours.sh`：本项目探针的常用 `wlink` 操作封装
+- `tools/mrs/mrs_wchlink_probe.c`：MRS 动态库调用探针
+- `tools/mrs/mrs_usb_trace.c`：libusb 调用跟踪层
+- `tools/wchlink/wlink_ours.sh`：本项目探针的常用 `wlink` 操作封装

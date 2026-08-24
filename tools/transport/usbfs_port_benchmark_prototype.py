@@ -121,7 +121,7 @@ def main() -> int:
     if unknown or not modes:
         parser.error(f"invalid modes: {', '.join(unknown) if unknown else args.modes}")
 
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     indexed_ports = list(zip(args.ports, range(len(args.ports))))
     scenarios = [(f"single-{index}", [port]) for index, port in enumerate(indexed_ports)]
     if len(indexed_ports) > 1:

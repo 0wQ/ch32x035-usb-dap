@@ -11,6 +11,11 @@
 typedef struct libusb_device_handle libusb_device_handle;
 typedef int (*libusb_bulk_transfer_fn)(libusb_device_handle *, unsigned char,
                                        unsigned char *, int, int *, unsigned int);
+typedef int (*libusb_bulk_write_fn)(libusb_device_handle *, unsigned char,
+                                    unsigned char *, int, int *, unsigned int);
+typedef int (*libusb_bulk_read_fn)(libusb_device_handle *, unsigned char,
+                                   unsigned char *, int, int *, unsigned int);
+typedef int (*jtag_bulk_fn)(libusb_device_handle *, int, char *, int, int, int *);
 typedef int (*libusb_control_transfer_fn)(libusb_device_handle *, unsigned char,
                                           unsigned char, unsigned short,
                                           unsigned short, unsigned char *,
@@ -37,6 +42,18 @@ extern int libusb_bulk_transfer(libusb_device_handle *handle,
                                 unsigned char endpoint, unsigned char *data,
                                 int length, int *transferred,
                                 unsigned int timeout);
+extern int libusb_bulk_write(libusb_device_handle *handle, unsigned char endpoint,
+                             unsigned char *data, int length, int *transferred,
+                             unsigned int timeout);
+extern int libusb_bulk_read(libusb_device_handle *handle, unsigned char endpoint,
+                            unsigned char *data, int length, int *transferred,
+                            unsigned int timeout);
+extern int jtag_libusb_bulk_write(libusb_device_handle *handle, int endpoint,
+                                   char *data, int length, int timeout,
+                                   int *transferred);
+extern int jtag_libusb_bulk_read(libusb_device_handle *handle, int endpoint,
+                                  char *data, int length, int timeout,
+                                  int *transferred);
 extern int libusb_control_transfer(libusb_device_handle *handle,
                                    unsigned char request_type,
                                    unsigned char request, unsigned short value,
@@ -189,5 +206,95 @@ static int trace_libusb_control_transfer(
     return result;
 }
 
+static int trace_libusb_bulk_write(libusb_device_handle *handle,
+                                   unsigned char endpoint, unsigned char *data,
+                                   int length, int *transferred,
+                                   unsigned int timeout) {
+    static libusb_bulk_write_fn real_write;
+    int result;
+
+    if (real_write == NULL) {
+        real_write = (libusb_bulk_write_fn)load_libusb_symbol("libusb_bulk_write");
+    }
+    fprintf(stderr, "USB WRITE ep=0x%02x len=%d data=", endpoint, length);
+    dump_bytes(data, length);
+    fprintf(stderr, "\n");
+    if (real_write == NULL) {
+        return -99;
+    }
+    result = real_write(handle, endpoint, data, length, transferred, timeout);
+    fprintf(stderr, "USB WRITE DONE ep=0x%02x result=%d transferred=%d\n",
+            endpoint, result, transferred != NULL ? *transferred : -1);
+    return result;
+}
+
+static int trace_libusb_bulk_read(libusb_device_handle *handle,
+                                  unsigned char endpoint, unsigned char *data,
+                                  int length, int *transferred,
+                                  unsigned int timeout) {
+    static libusb_bulk_read_fn real_read;
+    int result;
+
+    if (real_read == NULL) {
+        real_read = (libusb_bulk_read_fn)load_libusb_symbol("libusb_bulk_read");
+    }
+    result = real_read == NULL ? -99
+                               : real_read(handle, endpoint, data, length,
+                                           transferred, timeout);
+    fprintf(stderr, "USB READ ep=0x%02x len=%d result=%d transferred=%d data=",
+            endpoint, length, result, transferred != NULL ? *transferred : -1);
+    if (result == 0 && transferred != NULL) {
+        dump_bytes(data, *transferred);
+    }
+    fprintf(stderr, "\n");
+    return result;
+}
+static int trace_jtag_libusb_bulk_write(libusb_device_handle *handle, int endpoint,
+                                        char *data, int length, int timeout,
+                                        int *transferred) {
+    static jtag_bulk_fn real_write;
+
+    if (real_write == NULL) {
+        real_write = (jtag_bulk_fn)dlsym(RTLD_NEXT, "jtag_libusb_bulk_write");
+    }
+    fprintf(stderr, "JTAG WRITE ep=0x%02x len=%d data=", endpoint, length);
+    dump_bytes((const unsigned char *)data, length);
+    fprintf(stderr, "\n");
+    if (real_write == NULL) {
+        fprintf(stderr, "JTAG WRITE original symbol unavailable\n");
+        return -99;
+    }
+    int result = real_write(handle, endpoint, data, length, timeout, transferred);
+    fprintf(stderr, "JTAG WRITE DONE result=%d transferred=%d\n", result,
+            transferred != NULL ? *transferred : -1);
+    return result;
+}
+
+static int trace_jtag_libusb_bulk_read(libusb_device_handle *handle, int endpoint,
+                                       char *data, int length, int timeout,
+                                       int *transferred) {
+    static jtag_bulk_fn real_read;
+    int result;
+
+    if (real_read == NULL) {
+        real_read = (jtag_bulk_fn)dlsym(RTLD_NEXT, "jtag_libusb_bulk_read");
+    }
+    if (real_read == NULL) {
+        fprintf(stderr, "JTAG READ original symbol unavailable\n");
+        return -99;
+    }
+    result = real_read(handle, endpoint, data, length, timeout, transferred);
+    fprintf(stderr, "JTAG READ ep=0x%02x len=%d result=%d transferred=%d data=",
+            endpoint, length, result, transferred != NULL ? *transferred : -1);
+    if (result == 0 && transferred != NULL) {
+        dump_bytes((const unsigned char *)data, *transferred);
+    }
+    fprintf(stderr, "\n");
+    return result;
+}
 DYLD_INTERPOSE(trace_libusb_bulk_transfer, libusb_bulk_transfer);
+DYLD_INTERPOSE(trace_libusb_bulk_write, libusb_bulk_write);
+DYLD_INTERPOSE(trace_libusb_bulk_read, libusb_bulk_read);
+DYLD_INTERPOSE(trace_jtag_libusb_bulk_write, jtag_libusb_bulk_write);
+DYLD_INTERPOSE(trace_jtag_libusb_bulk_read, jtag_libusb_bulk_read);
 DYLD_INTERPOSE(trace_libusb_control_transfer, libusb_control_transfer);

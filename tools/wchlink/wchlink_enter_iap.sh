@@ -8,7 +8,7 @@ if [ "$#" -gt 2 ]; then
 fi
 
 serial=${1:-035CDAB8706E}
-project_directory=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project_directory=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 firmware_path=${2:-$project_directory/build/release/firmware.bin}
 
 if [ ! -f "$firmware_path" ]; then

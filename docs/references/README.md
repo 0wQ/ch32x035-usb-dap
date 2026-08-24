@@ -37,7 +37,7 @@
 | [`code/ch32-tapioca-probe/`](code/ch32-tapioca-probe/) | 52-bit codec、捕获夹具和 USB 协议文档 | 帧格式和 WCH-Link direct-DMI 协议的主要交叉验证 |
 | [`code/sigrok-rvswd/`](code/sigrok-rvswd/) | Sigrok RVSWD 协议解码器 | 解码 52-bit short frame 与 84-bit long frame |
 | [`code/wlink/`](code/wlink/) | `wlink` 主机的命令和 DMI 路径 | 确认当前测试工具实际发送的 USB 请求和重试行为 |
-| [`captures/`](captures/) | 正常 WCH-LinkE 到 CH32V307 的基线 CSV | 需要验证时序或字段时的原始证据 |
+| [`../../../../wch-linke-captures/`](../../../../wch-linke-captures/) | 独立 WCH-LinkE Logic 捕获与 CSV 分类仓库 | 需要执行 P0/P1/P6、验证时序或查看原始证据 |
 
 ## 已归档上游快照
 
@@ -49,7 +49,8 @@
 | `code/ch32-tapioca-probe/` | [pierrejay/ch32-tapioca-probe](https://github.com/pierrejay/ch32-tapioca-probe) | `260f55fee9334ad5813c26274b96e5ce0ee42cb9` | MIT，见目录内 `LICENSE` | 捕获验证过的 52-bit short-frame codec、夹具和 LinkE USB 协议说明 |
 | `code/sigrok-rvswd/` | [perigoso/sigrok-rvswd](https://github.com/perigoso/sigrok-rvswd) | `5d2e1d5ba1e10e70fdef293bdcf3b7d6c976f8af` | BSD-3-Clause，见目录内 `LICENSE` | 当前最直接的 RVSWD 波形字段解码参考 |
 | `code/wlink/` | [ch32-rs/wlink](https://github.com/ch32-rs/wlink) | `249f2c100005827dce8c7d82ff46917e52cddad9`，v0.1.2 | MIT 或 Apache-2.0，见目录内许可证 | 本项目实际用来验收的主机工具，保留其 USB 命令与 DMI 访问实现 |
-| `captures/wch-linke-v2.19-ch32v307-status-20260818.csv` | 本项目实测 | 2026-08-18 | 项目数据 | 真正 WCH-LinkE 到 CH32V307 的状态查询波形基线 |
+| `../../../../wch-linke-captures/CH32V307/20260818__official-linke-v2.19__status/raw.csv` | 本项目实测 | 2026-08-18 | 独立捕获仓库 | 官方 LinkE 到 CH32V307 的状态查询波形基线 |
+| `../../../../wch-linke-captures/CH582/20260824-151046__FA788F067F4B/` | 本项目实测 | 2026-08-24 | 独立捕获仓库 | 官方 LinkE v2.22、CH582M、MRS attach、OpenOCD 读回和 MRS 页读改写正式采样 |
 
 归档的第三方文件保持原始内容和原始路径层级，不作为本项目源码，也不被 `xmake` 编译。需要更新时，先在上游核对差异、许可证和提交，再替换对应目录。
 
