@@ -22,7 +22,7 @@ USB ISP 烧录不计入目标侧验收
 | --- | --- | --- | --- |
 | CH592 / CH59X | 已适配，ChipID `0x92`，family `0x0b` | 已完成实板验收 | MRS `libmcuupdate.dylib` 全擦、编程、校验、复位，镜像严格回读，OpenOCD examine 和 GDB 连续调试均通过 |
 | CH591 / CH59X | 与 CH592 共用 profile | 未独立实板验收 | 代码覆盖 ChipID `0x91` 和 family `0x0b`，不能用 CH592 的实测结果代替 CH591 验收 |
-| CH582 / CH583 | 已适配 CH58X profile，ChipID `0x82/0x83`，family `0x07` | 实板验收未完成 | CH582 实测连接返回 `81 55 01 12`，尚未取得目标 ChipID；接线和开发板状态需要先确认，CH581 未纳入当前 profile |
+| CH582 / CH583 | 已适配 CH58X profile，ChipID `0x82/0x83`，family `0x07` | CH582 已完成实板验收，CH583 未独立实测 | CH582 已通过 Rust `wlink`、MRS `libmcuupdate.dylib`、OpenOCD examine 和 GDB 基础会话；CH581 未纳入当前 profile |
 | CH32V307 / V30X | 已适配，和 V303/V305 共用 profile | 已完成基础实板验收 | CH32V307 已验证状态、保护/解除保护、Flash 回读和基础调试；V303/V305 未独立实测 |
 | CH32L103 | 已适配，family `0x0e` | MRS 擦除、下载、校验已验证 | 保护/解除保护也有实板记录；完整复位和 GDB 边界尚未单独形成验收记录 |
 | CH32X035（目标） | 已适配，family `0x0d` | 已完成基础实板验证 | 已验证保护、解除保护及目标供电断电重启回读；完整目标侧 MRS 编程、校验、复位和 GDB 验收尚未单独记录 |

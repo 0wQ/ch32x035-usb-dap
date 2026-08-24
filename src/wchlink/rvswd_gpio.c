@@ -18,6 +18,9 @@
 
 #define RVSWD_STATUS_OK   1u
 #define RVSWD_STATUS_BUSY 3u
+#define RVSWD_LONG_STATUS_OK 0u
+#define RVSWD_LONG_STATUS_BUSY 3u
+#define RVSWD_WAKEUP_CLOCKS 100u
 
 #define RVSWD_DMI_WRITE_RETRY_COUNT     16u
 #define RVSWD_DMI_READ_RETRY_COUNT      64u
@@ -48,16 +51,39 @@
 #define RVSWD_CH5XX_CHIP_ID_CH582   0x82u
 #define RVSWD_CH5XX_CHIP_ID_CH583   0x83u
 
-#define RVSWD_CH5XX_FLASH_KEY_ADDRESS     0x40001040u
-#define RVSWD_CH5XX_FLASH_DATA_ADDRESS    0x40001804u
-#define RVSWD_CH5XX_FLASH_CONTROL_ADDRESS 0x40001806u
+#define RVSWD_CH5XX_FLASH_KEY_ADDRESS       0x40001040u
+#define RVSWD_CH5XX_FLASH_WORD_DATA_ADDRESS 0x40001800u
+#define RVSWD_CH5XX_FLASH_BYTE_DATA_ADDRESS 0x40001804u
+#define RVSWD_CH5XX_FLASH_CONTROL_ADDRESS   0x40001806u
 #define RVSWD_CH5XX_DEBUG_DATA_ADDRESS     0xe0000380u
 #define RVSWD_CH5XX_FLASH_END             0x00078000u
+#define RVSWD_CH5XX_FLASH_PAGE_SIZE         0x00000100u
 #define RVSWD_CH5XX_FLASH_BLOCK_4K         0x00001000u
 #define RVSWD_CH5XX_FLASH_STATUS_RETRIES   102u
+#define RVSWD_CH5XX_PAGE_PROGRAM_TIMEOUT_US 100000u
 #define RVSWD_CH5XX_ERASE_STUB_ADDRESS     0x20004000u
 #define RVSWD_CH5XX_ERASE_STUB_STACK_TOP   0x20007000u
 #define RVSWD_CH5XX_ERASE_STUB_MAX_SIZE    512u
+
+#define RVSWD_FLASH_ERROR_CH5XX_COMMAND_BEGIN       0xc2u
+#define RVSWD_FLASH_ERROR_CH5XX_COMMAND_ADDRESS     0xc3u
+#define RVSWD_FLASH_ERROR_CH5XX_COMMAND_FINISH      0xc4u
+#define RVSWD_FLASH_ERROR_CH5XX_STATUS_BEGIN        0xc5u
+#define RVSWD_FLASH_ERROR_CH5XX_STATUS_READ_FIRST   0xc6u
+#define RVSWD_FLASH_ERROR_CH5XX_STATUS_READ_SECOND  0xc7u
+#define RVSWD_FLASH_ERROR_CH5XX_STATUS_FINISH       0xc8u
+#define RVSWD_FLASH_ERROR_CH5XX_STATUS_TIMEOUT      0xc9u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_UNALIGNED      0xcau
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_ERASE_CODE_MODE   0xcbu
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_ERASE_OPEN        0xccu
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_CODE_MODE 0xcdu
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_OPEN      0xceu
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_BEGIN     0xd0u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_SETUP    0xd1u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_DATA     0xd2u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_EXECUTE  0xd3u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_WAIT     0xd4u
+#define RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_STATUS   0xd5u
 
 #define RVSWD_FLASH_KEYR_ADDRESS     0x40022004u
 #define RVSWD_FLASH_OBKEYR_ADDRESS   0x40022008u
@@ -99,6 +125,11 @@ enum rvswd_flash_unlock_mode {
 enum rvswd_option_write_mode {
     RVSWD_OPTION_WRITE_FAST_BUFFER,
     RVSWD_OPTION_WRITE_HALFWORD,
+};
+
+enum rvswd_packet_mode {
+    RVSWD_PACKET_SHORT,
+    RVSWD_PACKET_LONG,
 };
 
 struct rvswd_target_profile {
@@ -156,6 +187,7 @@ static uint32_t rvswd_target_chip_id;
 static uint8_t rvswd_expected_wchlink_family;
 static bool rvswd_target_uses_family_hint;
 static uint8_t rvswd_connect_last_error;
+static enum rvswd_packet_mode rvswd_packet_mode = RVSWD_PACKET_SHORT;
 static uint8_t rvswd_memory_last_error;
 static uint8_t rvswd_memory_failure_dmi_status;
 static uint32_t rvswd_memory_failure_address;
@@ -363,6 +395,80 @@ static void rvswd_sample_range(uint8_t *frame, uint8_t first_bit, uint8_t bit_co
     }
 }
 
+static void rvswd_drive_value(uint32_t value, uint8_t bit_count) {
+    for (uint8_t bit = bit_count; bit > 0u; --bit) {
+        rvswd_drive_bit((uint8_t)((value >> (bit - 1u)) & 1u));
+    }
+}
+
+static uint32_t rvswd_sample_value(uint8_t bit_count) {
+    uint32_t value = 0u;
+
+    for (uint8_t bit = 0u; bit < bit_count; ++bit) {
+        value = (value << 1u) | rvswd_sample_bit();
+    }
+    return value;
+}
+
+static void rvswd_wakeup(bool stop_condition) {
+    __disable_irq();
+    rvswd_config_data_output();
+    rvswd_clock_high();
+    rvswd_data_high();
+    for (uint8_t clock = 0u; clock < RVSWD_WAKEUP_CLOCKS; ++clock) {
+        rvswd_clock_low();
+        rvswd_half_period();
+        rvswd_clock_high();
+        rvswd_half_period();
+    }
+    if (stop_condition) {
+        rvswd_stop();
+    }
+    __enable_irq();
+    bsp_delay_us(RVSWD_INTERFRAME_GUARD_US);
+}
+
+static bool rvswd_transaction_long(bool write, uint8_t address, uint32_t value,
+                                    uint32_t *result, uint8_t *status) {
+    const uint8_t operation = write ? 2u : 1u;
+    uint32_t target_address;
+    uint32_t target_data;
+    uint32_t target_status;
+    uint32_t target_parity;
+    uint8_t host_parity;
+
+    // 官方 CH582 抓包中该主机位在所有读写事务都为 0，按占位位发送
+    host_parity = 0u;
+
+    __disable_irq();
+    rvswd_start();
+    rvswd_drive_value(address & 0x7fu, 7u);
+    rvswd_drive_value(value, 32u);
+    rvswd_drive_value(operation, 2u);
+    rvswd_drive_value(host_parity, 1u);
+
+    rvswd_config_data_input();
+    target_address = rvswd_sample_value(7u);
+    target_data = rvswd_sample_value(32u);
+    target_status = rvswd_sample_value(2u);
+    target_parity = rvswd_sample_value(1u);
+    rvswd_config_data_output();
+    rvswd_stop();
+    __enable_irq();
+    bsp_delay_us(RVSWD_INTERFRAME_GUARD_US);
+
+    // 官方 CH582 抓包中目标末位是方向占位，读为 1、写为 0，不作为校验拒绝条件
+    (void)target_address;
+    (void)target_parity;
+    if (result != NULL) {
+        *result = target_data;
+    }
+    if (status != NULL) {
+        *status = (uint8_t)target_status;
+    }
+    return true;
+}
+
 static bool rvswd_transaction(const uint8_t *host, uint8_t *target, bool read) {
     __disable_irq();
     rvswd_start();
@@ -453,6 +559,15 @@ void rvswd_gpio_disconnect(void) {
 }
 
 static uint8_t rvswd_gpio_write_dmi_once(uint8_t address, uint32_t value) {
+    if (rvswd_packet_mode == RVSWD_PACKET_LONG) {
+        uint8_t status = RVSWD_LONG_STATUS_BUSY;
+
+        if (!rvswd_transaction_long(true, address, value, NULL, &status)) {
+            return RVSWD_LONG_STATUS_BUSY;
+        }
+        return status;
+    }
+
     uint8_t frame[7] = {0};
     uint8_t target[7] = {0};
 
@@ -475,6 +590,36 @@ static void rvswd_gpio_restore_debug_module(void) {
 }
 
 bool rvswd_gpio_write_dmi(uint8_t address, uint32_t value) {
+    if (rvswd_packet_mode == RVSWD_PACKET_LONG) {
+        uint8_t status;
+
+        rvswd_dmi_failure_retryable = false;
+        for (uint8_t retry = 0u; retry < RVSWD_DMI_WRITE_RETRY_COUNT; ++retry) {
+            if (!rvswd_transaction_long(true, address, value, NULL, &status)) {
+                rvswd_dmi_failure_retryable = true;
+                bsp_delay_us(RVSWD_DMI_ERROR_DELAY_US);
+                continue;
+            }
+
+            rvswd_dmi_last_status = status;
+            if (status == RVSWD_LONG_STATUS_OK) {
+                if (address == 0x17u) {
+                    // COMMAND 写入完成后留出执行窗口，避免下一次 DMI 访问撞上 abstract busy
+                    bsp_delay_us(RVSWD_ABSTRACT_COMMAND_DELAY_US);
+                }
+                return true;
+            }
+            if (status == RVSWD_LONG_STATUS_BUSY) {
+                rvswd_dmi_failure_retryable = true;
+                bsp_delay_us(RVSWD_DMI_BUSY_DELAY_US);
+            } else {
+                rvswd_dmi_failure_retryable = false;
+                bsp_delay_us(RVSWD_DMI_ERROR_DELAY_US);
+            }
+        }
+        return false;
+    }
+
     uint8_t frame[7] = {0};
     uint8_t target[7] = {0};
     uint8_t status;
@@ -580,25 +725,6 @@ static bool rvswd_gpio_read_memory8_ch5xx(uint32_t address, uint8_t *value) {
 
     *value = (uint8_t)data;
     return true;
-}
-
-static bool rvswd_gpio_write_memory8_ch5xx(uint32_t address, uint8_t value) {
-    uint32_t abstractcs;
-
-    // LinkE 通过 data0 传入地址，Program Buffer 从 data1 取出目标字节
-    if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_DEBUG_DATA_ADDRESS) ||
-        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
-        !rvswd_gpio_write_dmi(0x20u, 0x00468483u) ||
-        !rvswd_gpio_write_dmi(0x21u, 0x00958023u) ||
-        !rvswd_gpio_write_dmi(0x22u, 0x00100073u) ||
-        !rvswd_gpio_write_dmi(0x05u, value) ||
-        !rvswd_gpio_write_dmi(0x04u, address) ||
-        !rvswd_gpio_write_dmi(0x17u, 0x0027100bu) ||
-        !rvswd_gpio_wait_abstract_idle(&abstractcs)) {
-        return false;
-    }
-
-    return ((abstractcs >> 8u) & 0x07u) == 0u;
 }
 
 enum rvswd_ch5xx_byte_access_mode {
@@ -1123,30 +1249,76 @@ static bool rvswd_gpio_ch5xx_flash_issue(struct rvswd_ch5xx_byte_access *access,
                                          uint8_t command) {
     return rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u) &&
            rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 5u) &&
-           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS, command);
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_BYTE_DATA_ADDRESS,
+                                          command);
+}
+
+static bool rvswd_gpio_ch5xx_flash_wait_control_ready(
+    struct rvswd_ch5xx_byte_access *access) {
+    for (uint32_t retry = 0u; retry < RVSWD_CH5XX_FLASH_STATUS_RETRIES; ++retry) {
+        uint8_t control;
+
+        if (!rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS,
+                                           &control)) {
+            return false;
+        }
+        if ((control & 0x80u) == 0u) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool rvswd_gpio_ch5xx_flash_end(struct rvswd_ch5xx_byte_access *access) {
+    return rvswd_gpio_ch5xx_flash_wait_control_ready(access) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u);
+}
+
+static bool rvswd_gpio_ch5xx_flash_out(struct rvswd_ch5xx_byte_access *access,
+                                       uint8_t value) {
+    return rvswd_gpio_ch5xx_flash_wait_control_ready(access) &&
+           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_BYTE_DATA_ADDRESS,
+                                          value);
+}
+
+static bool rvswd_gpio_ch5xx_flash_in(struct rvswd_ch5xx_byte_access *access,
+                                      uint8_t *value) {
+    return rvswd_gpio_ch5xx_flash_wait_control_ready(access) &&
+           rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_BYTE_DATA_ADDRESS,
+                                         value);
 }
 
 static bool rvswd_gpio_ch5xx_flash_begin(struct rvswd_ch5xx_byte_access *access,
                                          uint8_t command) {
+    // CH5xx 每次切换命令前先完成命令 6，命令口状态不能跨命令复用
     return rvswd_gpio_ch5xx_flash_issue(access, 6u) &&
-           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u) &&
+           rvswd_gpio_ch5xx_flash_end(access) &&
            rvswd_gpio_ch5xx_flash_issue(access, command);
 }
 
-static bool rvswd_gpio_ch5xx_flash_unlock(void) {
+static bool rvswd_gpio_ch5xx_flash_open(struct rvswd_ch5xx_byte_access *access) {
+    // FlashOpen 先使能命令口，再完成 0xff 初始化命令，擦页和写页均从此状态开始
+    return rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 4u) &&
+           rvswd_gpio_ch5xx_flash_begin(access, 0xffu) &&
+           rvswd_gpio_ch5xx_flash_end(access);
+}
+
+static bool rvswd_gpio_ch5xx_flash_enable_code_mode(void) {
     uint32_t abstractcs;
 
-    // 与 LinkE 使用同一段 Program Buffer，在一次执行中连续写入 key 和擦除模式
+    // SAFE_ACCESS_SIG 必须在修改 ROM 配置后清零，避免命令口继承未完成的安全访问状态
     if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_FLASH_KEY_ADDRESS) ||
         !rvswd_gpio_write_raw_gpr(10u, 0x57u) ||
         !rvswd_gpio_write_raw_gpr(11u, 0xa8u) ||
         !rvswd_gpio_write_raw_gpr(12u, 0xe0u) ||
+        !rvswd_gpio_write_dmi(0x18u, 0u) ||
         !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
         !rvswd_gpio_write_dmi(0x20u, 0x00a68023u) ||
         !rvswd_gpio_write_dmi(0x21u, 0x00b68023u) ||
         !rvswd_gpio_write_dmi(0x22u, 0x00010001u) ||
         !rvswd_gpio_write_dmi(0x23u, 0x00c68223u) ||
-        !rvswd_gpio_write_dmi(0x24u, 0x00100073u) ||
+        !rvswd_gpio_write_dmi(0x24u, 0x00068023u) ||
+        !rvswd_gpio_write_dmi(0x25u, 0x00100073u) ||
         !rvswd_gpio_write_dmi(0x17u, 0x00271000u) ||
         !rvswd_gpio_wait_abstract_idle(&abstractcs)) {
         return false;
@@ -1157,17 +1329,14 @@ static bool rvswd_gpio_ch5xx_flash_unlock(void) {
 
 static bool rvswd_gpio_ch5xx_flash_write_address(struct rvswd_ch5xx_byte_access *access,
                                                  uint32_t address) {
-    return rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
-                                         (uint8_t)(address >> 16u)) &&
-           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
-                                         (uint8_t)(address >> 8u)) &&
-           rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
-                                         (uint8_t)address);
+    return rvswd_gpio_ch5xx_flash_out(access, (uint8_t)(address >> 16u)) &&
+           rvswd_gpio_ch5xx_flash_out(access, (uint8_t)(address >> 8u)) &&
+           rvswd_gpio_ch5xx_flash_out(access, (uint8_t)address);
 }
 
 static bool rvswd_gpio_ch5xx_flash_wait_ready(struct rvswd_ch5xx_byte_access *access) {
-    if (!rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS, 0u)) {
-        rvswd_flash_last_error = 0xc4u;
+    if (!rvswd_gpio_ch5xx_flash_end(access)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_COMMAND_FINISH;
         return false;
     }
 
@@ -1175,44 +1344,141 @@ static bool rvswd_gpio_ch5xx_flash_wait_ready(struct rvswd_ch5xx_byte_access *ac
         uint8_t status;
 
         // LinkE 连续读取两次状态，第二次读数用于判断命令是否仍在执行
-        if (!rvswd_gpio_ch5xx_flash_issue(access, 5u)) {
-            rvswd_flash_last_error = 0xc5u;
+        if (!rvswd_gpio_ch5xx_flash_begin(access, 5u)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_STATUS_BEGIN;
             return false;
         }
-        if (!rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
-                                          &status)) {
-            rvswd_flash_last_error = 0xc6u;
+        if (!rvswd_gpio_ch5xx_flash_in(access, &status)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_STATUS_READ_FIRST;
             return false;
         }
-        if (!rvswd_gpio_ch5xx_erase_read8(access, RVSWD_CH5XX_FLASH_DATA_ADDRESS,
-                                          &status)) {
-            rvswd_flash_last_error = 0xc7u;
+        if (!rvswd_gpio_ch5xx_flash_in(access, &status)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_STATUS_READ_SECOND;
             return false;
         }
-        if (!rvswd_gpio_ch5xx_erase_write8(access, RVSWD_CH5XX_FLASH_CONTROL_ADDRESS,
-                                           0u)) {
-            rvswd_flash_last_error = 0xc8u;
+        if (!rvswd_gpio_ch5xx_flash_end(access)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_STATUS_FINISH;
             return false;
         }
         if ((status & 1u) == 0u) {
             return true;
         }
     }
-    rvswd_flash_last_error = 0xc9u;
+    rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_STATUS_TIMEOUT;
     return false;
 }
 
-static bool rvswd_gpio_ch5xx_flash_erase_block(struct rvswd_ch5xx_byte_access *access,
-                                               uint32_t address) {
-    if (!rvswd_gpio_ch5xx_flash_begin(access, 0x20u)) {
-        rvswd_flash_last_error = 0xc2u;
+static bool rvswd_gpio_ch5xx_flash_erase_command(
+    struct rvswd_ch5xx_byte_access *access, uint32_t address, uint8_t command) {
+    if (!rvswd_gpio_ch5xx_flash_begin(access, command)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_COMMAND_BEGIN;
         return false;
     }
     if (!rvswd_gpio_ch5xx_flash_write_address(access, address)) {
-        rvswd_flash_last_error = 0xc3u;
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_COMMAND_ADDRESS;
         return false;
     }
     if (!rvswd_gpio_ch5xx_flash_wait_ready(access)) {
+        return false;
+    }
+    return true;
+}
+
+static bool rvswd_gpio_ch5xx_flash_program_page(
+    struct rvswd_ch5xx_byte_access *access, const uint8_t *data) {
+    uint32_t abstractcs;
+
+    // 官方 0x33D4 与 CH5xx 参考实现都使用该 Program Buffer，将 a4 的字写入 Flash 数据口
+    access->mode = RVSWD_CH5XX_BYTE_ACCESS_NONE;
+    if (!rvswd_gpio_write_raw_gpr(13u, RVSWD_CH5XX_FLASH_WORD_DATA_ADDRESS) ||
+        !rvswd_gpio_write_raw_gpr(5u, 21u) ||
+        !rvswd_gpio_write_dmi(0x18u, 0u) ||
+        !rvswd_gpio_write_dmi(0x16u, 0x00000700u) ||
+        !rvswd_gpio_write_dmi(0x20u, 0x4791c298u) ||
+        !rvswd_gpio_write_dmi(0x21u, 0x00668703u) ||
+        !rvswd_gpio_write_dmi(0x22u, 0xfe074ee3u) ||
+        !rvswd_gpio_write_dmi(0x23u, 0x00568323u) ||
+        !rvswd_gpio_write_dmi(0x24u, 0xfbed17fdu) ||
+        !rvswd_gpio_write_dmi(0x25u, 0x00100073u)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_SETUP;
+        return false;
+    }
+
+    for (uint32_t offset = 0u; offset < RVSWD_CH5XX_FLASH_PAGE_SIZE; offset += 4u) {
+        uint32_t value = (uint32_t)data[offset + 0u] |
+                         ((uint32_t)data[offset + 1u] << 8u) |
+                         ((uint32_t)data[offset + 2u] << 16u) |
+                         ((uint32_t)data[offset + 3u] << 24u);
+
+        if (!rvswd_gpio_write_dmi(0x04u, value)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_DATA;
+            return false;
+        }
+        // 该 Abstract Command 同时把 data0 传入 a4 并执行 Program Buffer
+        if (!rvswd_gpio_write_dmi(0x17u, 0x0027100eu)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_EXECUTE;
+            return false;
+        }
+        // 目标执行真实 Flash 写入时 busy 可长于普通内存访问，单字仍受 100 ms 上限约束
+        if (!rvswd_gpio_wait_abstract_idle_timeout(
+                &abstractcs, RVSWD_CH5XX_PAGE_PROGRAM_TIMEOUT_US)) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_WAIT;
+            return false;
+        }
+        if (((abstractcs >> 8u) & 0x07u) != 0u) {
+            rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_STATUS;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool rvswd_gpio_flash_rewrite_page(uint32_t address, const uint8_t *data) {
+    const struct rvswd_target_profile *profile = rvswd_gpio_target_profile();
+    struct rvswd_ch5xx_byte_access access = {
+        .mode = RVSWD_CH5XX_BYTE_ACCESS_NONE,
+    };
+
+    rvswd_flash_last_error = 0u;
+    if (profile == NULL || !profile->ch5xx_protocol || data == NULL) {
+        rvswd_flash_last_error = 0x0fu;
+        return false;
+    }
+    if ((address & 0xffu) != 0u) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_UNALIGNED;
+        return false;
+    }
+
+    // 官方 0x0A 路径先用命令 0x81 擦页，再独立建立命令 0x02 的整页写入状态
+    if (!rvswd_gpio_ch5xx_flash_enable_code_mode()) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_ERASE_CODE_MODE;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_open(&access)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_ERASE_OPEN;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_erase_command(&access, address, 0x81u)) {
+        return false;
+    }
+    // 擦页会结束前一条 Flash 命令，写页前重新写入 SAFE_ACCESS_SIG 和 code mode
+    if (!rvswd_gpio_ch5xx_flash_enable_code_mode()) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_CODE_MODE;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_open(&access)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_OPEN;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_begin(&access, 0x02u) ||
+        !rvswd_gpio_ch5xx_flash_write_address(&access, address)) {
+        rvswd_flash_last_error = RVSWD_FLASH_ERROR_CH5XX_PAGE_PROGRAM_BEGIN;
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_program_page(&access, data)) {
+        return false;
+    }
+    if (!rvswd_gpio_ch5xx_flash_wait_ready(&access)) {
         return false;
     }
     return true;
@@ -1235,7 +1501,7 @@ static bool rvswd_gpio_ch5xx_flash_erase_all(void) {
         rvswd_flash_last_error = 0xc2u;
         return false;
     }
-    if (!rvswd_gpio_ch5xx_flash_unlock()) {
+    if (!rvswd_gpio_ch5xx_flash_enable_code_mode()) {
         rvswd_flash_last_error = 0xc3u;
         return false;
     }
@@ -1856,6 +2122,37 @@ bool rvswd_gpio_reset_and_run(void) {
 }
 
 bool rvswd_gpio_read_dmi(uint8_t address, uint32_t *value) {
+    if (value == NULL) {
+        return false;
+    }
+    if (rvswd_packet_mode == RVSWD_PACKET_LONG) {
+        uint8_t status;
+        uint32_t data;
+
+        rvswd_dmi_failure_retryable = false;
+        for (uint8_t retry = 0u; retry < RVSWD_DMI_READ_RETRY_COUNT; ++retry) {
+            if (!rvswd_transaction_long(false, address, 0u, &data, &status)) {
+                rvswd_dmi_failure_retryable = true;
+                bsp_delay_us(RVSWD_DMI_ERROR_DELAY_US);
+                continue;
+            }
+
+            rvswd_dmi_last_status = status;
+            if (status == RVSWD_LONG_STATUS_OK) {
+                *value = data;
+                return true;
+            }
+            if (status == RVSWD_LONG_STATUS_BUSY) {
+                rvswd_dmi_failure_retryable = true;
+                bsp_delay_us(RVSWD_DMI_BUSY_DELAY_US);
+            } else {
+                rvswd_dmi_failure_retryable = false;
+                bsp_delay_us(RVSWD_DMI_ERROR_DELAY_US);
+            }
+        }
+        return false;
+    }
+
     uint8_t frame[7] = {0};
     uint8_t target[7] = {0};
     uint8_t status;
@@ -1930,6 +2227,11 @@ static bool rvswd_try_connect(void) {
     rvswd_connect_last_error = 0u;
     rvswd_target_chip_id = 0u;
     rvswd_target_uses_family_hint = false;
+    if (rvswd_packet_mode == RVSWD_PACKET_LONG) {
+        // CH58x 的 V4A 调试模块连接前需要先清空两线接口的唤醒状态
+        rvswd_wakeup(true);
+        rvswd_wakeup(false);
+    }
     for (uint8_t attempt = 0u; attempt < 3u; ++attempt) {
         uint32_t config = 0u;
         uint32_t dmstatus = 0u;
@@ -1938,7 +2240,7 @@ static bool rvswd_try_connect(void) {
         // 目标上电或复位后需要留出调试模块启动时间
         bsp_delay_ms(16u);
 
-        // 通过短帧 DMI 解锁调试模块并读回配置签名
+        // 通过当前目标族的 DMI 帧解锁调试模块并读回配置签名
         // 初始化阶段按 DTM 管线推进请求，单次 BUSY 不重复占用同一请求
         rvswd_gpio_restore_debug_module();
         config_read = rvswd_gpio_read_dmi(RVSWD_DMI_CONFIG, &config);
@@ -1966,6 +2268,11 @@ static bool rvswd_try_connect(void) {
             rvswd_connect_last_error = config_read ? 0x11u : 0x12u;
         }
     }
+    if (rvswd_packet_mode == RVSWD_PACKET_SHORT) {
+        // OpenOCD 可能未预先提供 CH58x family，补一次 long frame 探测
+        rvswd_packet_mode = RVSWD_PACKET_LONG;
+        return rvswd_try_connect();
+    }
     return false;
 }
 
@@ -1984,6 +2291,9 @@ uint32_t rvswd_gpio_target_chip_id(void) {
 void rvswd_gpio_set_target_wchlink_family_hint(uint8_t family) {
     rvswd_expected_wchlink_family = family;
     rvswd_target_uses_family_hint = false;
+    rvswd_packet_mode = family == WCHLINK_TARGET_FAMILY_CH58X
+                            ? RVSWD_PACKET_LONG
+                            : RVSWD_PACKET_SHORT;
 }
 
 uint8_t rvswd_gpio_target_wchlink_family(void) {

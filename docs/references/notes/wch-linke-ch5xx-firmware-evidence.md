@@ -228,10 +228,40 @@ stepi：pc 从 0x83c 前进到 0x83e
 - USB 协议 family 使用 `0x07`
 - loader RAM、CH5xx 8 位 Flash 命令口和 `0x78000` 擦除边界沿用 CH58x/CH59x 共用路径
 
-2026-08-22 使用该版本固件在模拟 Link 上连接实际 CH582，主控固件已重新烧录成功，
-但连接返回 `81 55 01 12`，对应探针内部 RVSWD 配置读取失败，尚未得到目标 ChipID。
-这次结果不能证明 CH582 协议实现错误，仍需先确认目标侧 PB15=SWCLK、PB14=SWDIO、
-共地和供电；本地 `wlink` 参考资料明确 CH58x 的调试引脚为 PB15/PB14
+2026-08-23 重新确认目标 CH582 已供电后，使用项目探针 Serial `035CDAB8706E`
+完成了 CH58x RVSWD long frame 适配。官方 LinkE 物理抓包显示每个事务包含 84 个有效
+字段时钟，随后由 STOP 序列产生一个额外时钟；host parity 位在本次 CH582 连接中固定为
+0，target 末位按读写方向变化，不能直接套用 CH32V307 short frame 的状态和校验规则。
+
+按该抓包修正后，项目探针对 CH582 完成以下闭环：
+
+```text
+./tools/wchlink/wlink_ours.sh --chip CH582 --speed low status
+Attached chip: CH582 [CH582] (ChipID: 0x82000000)
+
+./tools/wchlink/wlink_ours.sh --chip CH582 erase
+Erase done
+
+./tools/wchlink/wlink_ours.sh --chip CH582 flash -R blink_ch5xx.bin
+Flash done
+
+readback: cmp=match
+sha256: 8f2399937656bb6f77d4429afeb631956842bafb19e4aab480285a4dd3775860
+
+./tools/wchlink/wlink_ours.sh --chip CH582 reset
+./tools/wchlink/wlink_ours.sh --chip CH582 status
+Dmstatus.version=2, authenticated=true, cmderr=0
+```
+
+MRS `libmcuupdate.dylib` 使用 family `7`、Flash 地址 `0` 完成 `check`、独立
+`clear_type=2` 擦除、`flags=0x0f` 编程/校验/复位和独立 verify，均返回 `0`。
+`clear_type=0/1` 分别返回 `125/126`，这是裸 X035 开发板没有目标电源和 NRST 控制时
+对应的硬件擦除边界，不代表 CH582 RVSWD 或 Code Flash 路径失败。MRS 默认地址
+`0x08000000` 也不适用于 CH582，必须显式使用地址 `0`
+
+使用 MounRiver OpenOCD 发行版对同一项目探针完成 CH582 examine，并通过 GDB 完成
+halt、resume、再次 halt、PC/SP 读取和 SRAM 读取。CH583 仍只有代码 profile，未做独立
+实板验收。CH58x 的调试引脚仍需连接为 PB15=SWCLK、PB14=SWDIO、共地并保证目标供电
 
 ## MRS `libmcuupdate.dylib` 边界验证
 

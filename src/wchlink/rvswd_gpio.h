@@ -27,6 +27,7 @@ bool rvswd_gpio_execute(uint32_t entry, uint32_t stack_top, uint32_t mode,
                         uint32_t address, uint32_t length, uint32_t data_address,
                         uint32_t *result);
 bool rvswd_gpio_flash_erase_all(void);
+bool rvswd_gpio_flash_rewrite_page(uint32_t address, const uint8_t *data);
 bool rvswd_gpio_flash_read_protected(bool *protected);
 bool rvswd_gpio_flash_write_protected(bool *protected);
 bool rvswd_gpio_flash_set_read_protected(bool protected);

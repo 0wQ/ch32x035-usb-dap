@@ -16,8 +16,12 @@
 #define WCHLINK_FAMILY_CONTROL 0x0du
 #define WCHLINK_FAMILY_INFO    0x11u
 #define WCHLINK_FAMILY_DMI     0x08u
+#define WCHLINK_FAMILY_PARTIAL_WRITE 0x0au
 #define WCHLINK_FAMILY_CONFIG  0x06u
 #define WCHLINK_FAMILY_DEVICE_MODE 0x0fu
+
+#define WCHLINK_PARTIAL_WRITE_REPLY_OK             0x02u
+#define WCHLINK_PARTIAL_WRITE_REPLY_FAILED         0x15u
 
 #define WCHLINK_CONFIG_READ_PROTECTION    0x01u
 #define WCHLINK_CONFIG_DISABLE_PROTECTION 0x02u
@@ -89,10 +93,20 @@ static uint32_t wchlink_loader_expected = WCHLINK_LOADER_DEFAULT_SIZE;
 static bool wchlink_loader_variable_length;
 static uint8_t wchlink_loader_error;
 static uint32_t wchlink_flash_data_received;
+static uint32_t wchlink_flash_transfer_received;
+static uint32_t wchlink_flash_transfer_length;
 static uint32_t wchlink_flash_chunk_length;
 static uint32_t wchlink_flash_loader_mode;
 static uint32_t wchlink_flash_checksum;
 static bool wchlink_loader_ready;
+static bool wchlink_flash_openocd_mode;
+static bool wchlink_flash_prepare_seen;
+static uint32_t wchlink_partial_write_address;
+static uint8_t wchlink_partial_write_length;
+static uint8_t wchlink_partial_write_data[WCHLINK_FLASH_PACKET_SIZE];
+static uint8_t wchlink_partial_write_page[WCHLINK_FLASH_PACKET_SIZE];
+static uint8_t wchlink_partial_cache[WCHLINK_FLASH_CHUNK_SIZE];
+static bool wchlink_partial_cache_valid;
 static bool wchlink_data_reply_pending;
 static uint8_t wchlink_data_reply_status;
 static uint8_t wchlink_loader_failure_dmi_status;
@@ -133,10 +147,16 @@ static void wchlink_clear_transfer_state(void) {
     wchlink_loader_variable_length = false;
     wchlink_loader_error = 0u;
     wchlink_flash_data_received = 0u;
+    wchlink_flash_transfer_received = 0u;
+    wchlink_flash_transfer_length = 0u;
     wchlink_flash_chunk_length = 0u;
     wchlink_flash_loader_mode = 0u;
     wchlink_flash_checksum = 0u;
     wchlink_loader_ready = false;
+    wchlink_flash_openocd_mode = false;
+    wchlink_partial_write_address = 0u;
+    wchlink_partial_write_length = 0u;
+    memset(wchlink_partial_write_data, 0, sizeof(wchlink_partial_write_data));
     wchlink_data_reply_pending = false;
     wchlink_data_reply_status = 0u;
     wchlink_loader_failure_dmi_status = 0u;
@@ -149,6 +169,104 @@ static const struct wchlink_loader_layout *wchlink_target_loader_layout(void) {
         return &wchlink_loader_layout_ch59x;
     }
     return &wchlink_loader_layout_default;
+}
+
+static uint32_t wchlink_flash_padded_data_length(void) {
+    uint32_t length = wchlink_flash_chunk_length;
+
+    // CH5xx loader 以完整 256 字节页参与校验，尾页需要保持擦除态
+    if (wchlink_target_uses_ch5xx_loader()) {
+        length = (length + (WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u)) &
+                 ~(WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u);
+    }
+    return length;
+}
+
+static bool wchlink_flash_write_padding(const struct wchlink_loader_layout *layout,
+                                        uint32_t from, uint32_t to) {
+    while (from < to) {
+        uint32_t length = to - from;
+
+        if (length > sizeof(wchlink_flash_padding)) {
+            length = sizeof(wchlink_flash_padding);
+        }
+        memset(wchlink_flash_padding, 0xff, length);
+        if (!rvswd_gpio_write_memory(layout->data + from, wchlink_flash_padding,
+                                     length)) {
+            return false;
+        }
+        wchlink_flash_checksum =
+            wchlink_checksum_add(wchlink_flash_checksum, wchlink_flash_padding,
+                                 length);
+        from += length;
+    }
+    return true;
+}
+
+static void wchlink_partial_cache_range(uint32_t address, const uint8_t *data,
+                                        uint32_t length) {
+    uint32_t start = address;
+    uint32_t end = address + length;
+
+    if (start >= WCHLINK_FLASH_CHUNK_SIZE || end <= start) {
+        return;
+    }
+    if (end > WCHLINK_FLASH_CHUNK_SIZE) {
+        end = WCHLINK_FLASH_CHUNK_SIZE;
+    }
+    memcpy(&wchlink_partial_cache[start], data, end - start);
+}
+
+static bool wchlink_partial_write_flash_page(void) {
+    uint32_t page_address = wchlink_partial_write_address &
+                            ~(WCHLINK_FLASH_PACKET_SIZE - 1u);
+    uint32_t sector_address = wchlink_partial_write_address &
+                              ~(WCHLINK_FLASH_CHUNK_SIZE - 1u);
+    uint32_t page_offset = wchlink_partial_write_address &
+                           (WCHLINK_FLASH_PACKET_SIZE - 1u);
+
+    if (!wchlink_target_uses_ch5xx_loader() ||
+        page_offset + wchlink_partial_write_length > WCHLINK_FLASH_PACKET_SIZE) {
+        return false;
+    }
+
+    if (wchlink_partial_cache_valid && sector_address == 0u) {
+        uint32_t cache_offset = page_address - sector_address;
+
+        memcpy(wchlink_partial_write_page,
+               &wchlink_partial_cache[cache_offset],
+               WCHLINK_FLASH_PACKET_SIZE);
+    } else {
+        // 没有下载缓存时只回读目标页，不扩展为整个 4 KiB 扇区
+        for (uint32_t offset = 0u; offset < WCHLINK_FLASH_PACKET_SIZE;
+             offset += 4u) {
+            uint32_t value;
+
+            if (!rvswd_gpio_read_memory32(page_address + offset, &value)) {
+                return false;
+            }
+            wchlink_partial_write_page[offset + 0u] = (uint8_t)value;
+            wchlink_partial_write_page[offset + 1u] = (uint8_t)(value >> 8u);
+            wchlink_partial_write_page[offset + 2u] = (uint8_t)(value >> 16u);
+            wchlink_partial_write_page[offset + 3u] = (uint8_t)(value >> 24u);
+        }
+    }
+    memcpy(&wchlink_partial_write_page[page_offset],
+           wchlink_partial_write_data, wchlink_partial_write_length);
+
+    // CH5xx 只能把 1 写成 0，软件断点替换指令前必须整页读改写
+    if (!rvswd_gpio_flash_rewrite_page(page_address, wchlink_partial_write_page)) {
+        return false;
+    }
+
+    if (wchlink_partial_cache_valid && sector_address == 0u) {
+        uint32_t cache_offset = page_address - sector_address;
+
+        memcpy(&wchlink_partial_cache[cache_offset],
+               wchlink_partial_write_page,
+               WCHLINK_FLASH_PACKET_SIZE);
+    }
+    return true;
 }
 
 static size_t wchlink_ack(uint8_t *response, size_t capacity, uint8_t family) {
@@ -387,6 +505,7 @@ void wchlink_protocol_reset(void) {
     wchlink_connected = false;
     wchlink_ch5xx_info_query_seen = false;
     wchlink_isp_request_pending = false;
+    wchlink_flash_prepare_seen = false;
     wchlink_clear_transfer_state();
 }
 
@@ -467,66 +586,112 @@ void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
         return;
     }
 
-    if (wchlink_write_mode == 2u && length <= WCHLINK_FLASH_PACKET_SIZE &&
-        (length & 3u) == 0u && wchlink_write_remaining != 0u &&
-        wchlink_flash_data_received + length <= WCHLINK_FLASH_CHUNK_SIZE) {
-        uint32_t padded_length;
-        size_t write_length = length;
-        bool ch5xx_loader;
+    if (wchlink_write_mode == 3u) {
+        bool success;
 
-        layout = wchlink_target_loader_layout();
-        ch5xx_loader = wchlink_target_uses_ch5xx_loader();
-        padded_length = wchlink_flash_chunk_length;
-        if (ch5xx_loader) {
-            padded_length = (padded_length + (WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u)) &
-                            ~(WCHLINK_CH5XX_LOADER_PAGE_SIZE - 1u);
-        }
-        if (wchlink_flash_data_received + write_length > padded_length) {
-            write_length = padded_length - wchlink_flash_data_received;
-        }
-        if (write_length == 0u ||
-            !rvswd_gpio_write_memory(layout->data + wchlink_flash_data_received,
-                                     data, (uint32_t)write_length)) {
+        if (length != wchlink_partial_write_length ||
+            length > sizeof(wchlink_partial_write_data)) {
             wchlink_write_mode = 0u;
-            wchlink_data_reply_status = rvswd_gpio_memory_last_error();
-            if (wchlink_data_reply_status == 0u) {
-                wchlink_data_reply_status = 0x15u;
-            }
+            wchlink_data_reply_status = 0x15u;
             wchlink_data_reply_pending = true;
             return;
         }
-        wchlink_flash_checksum = wchlink_checksum_add(wchlink_flash_checksum, data,
-                                                       write_length);
-        wchlink_flash_data_received += (uint32_t)write_length;
-        if (wchlink_flash_data_received >= wchlink_flash_chunk_length) {
+        memcpy(wchlink_partial_write_data, data, length);
+        success = wchlink_partial_write_flash_page();
+        wchlink_write_mode = 0u;
+        wchlink_data_reply_status = success ? WCHLINK_PARTIAL_WRITE_REPLY_OK
+                                             : WCHLINK_PARTIAL_WRITE_REPLY_FAILED;
+        wchlink_data_reply_pending = true;
+        return;
+    }
+
+    if (wchlink_write_mode == 2u && length <= WCHLINK_FLASH_PACKET_SIZE &&
+        (length & 3u) == 0u && wchlink_write_remaining != 0u) {
+        uint32_t transfer_length;
+        uint32_t transfer_remaining;
+        size_t write_length = 0u;
+
+        layout = wchlink_target_loader_layout();
+        if (wchlink_flash_transfer_length == 0u) {
+            if (wchlink_flash_openocd_mode) {
+                // MRS 内置 OpenOCD 先把段长对齐到 256 字节，再按该长度发送
+                // 旧版 OpenOCD 仍声明原始段长，此时保留其固定 4096 字节传输
+                wchlink_flash_transfer_length =
+                    (wchlink_flash_chunk_length & 0xffu) == 0u
+                        ? wchlink_flash_chunk_length
+                        : WCHLINK_FLASH_CHUNK_SIZE;
+            } else {
+                // MRS 和 wlink 以数据端点包长对齐尾包，首包长度就是本次包长
+                wchlink_flash_transfer_length =
+                    ((wchlink_flash_chunk_length + (uint32_t)length - 1u) /
+                     (uint32_t)length) * (uint32_t)length;
+            }
+        }
+        transfer_length = wchlink_flash_transfer_length;
+        transfer_remaining = transfer_length - wchlink_flash_transfer_received;
+        if ((uint32_t)length > transfer_remaining) {
+            // 主机包不能跨越本次数据块边界，超长包只消费边界内部分
+            length = (size_t)transfer_remaining;
+        }
+        if (wchlink_flash_transfer_received < wchlink_flash_chunk_length) {
+            write_length = wchlink_flash_chunk_length -
+                           wchlink_flash_transfer_received;
+            if (write_length > length) {
+                write_length = length;
+            }
+            if (write_length != 0u &&
+                !rvswd_gpio_write_memory(
+                    layout->data + wchlink_flash_transfer_received, data,
+                    (uint32_t)write_length)) {
+                wchlink_write_mode = 0u;
+                wchlink_data_reply_status = rvswd_gpio_memory_last_error();
+                if (wchlink_data_reply_status == 0u) {
+                    wchlink_data_reply_status = 0x15u;
+                }
+                wchlink_data_reply_pending = true;
+                return;
+            }
+            if (write_length != 0u) {
+                wchlink_partial_cache_range(
+                    wchlink_write_address + wchlink_flash_transfer_received,
+                    data, (uint32_t)write_length);
+                wchlink_flash_checksum =
+                    wchlink_checksum_add(wchlink_flash_checksum, data,
+                                         write_length);
+                wchlink_flash_data_received += (uint32_t)write_length;
+            }
+        }
+        wchlink_flash_transfer_received += (uint32_t)length;
+        if (wchlink_flash_transfer_received < transfer_length) {
+            return;
+        }
+
+        // loader 读取完整页，实际数据不足的尾部必须显式写入擦除态
+        {
+            uint32_t padded_length = wchlink_flash_padded_data_length();
+
+            if (wchlink_flash_data_received < padded_length &&
+                !wchlink_flash_write_padding(layout,
+                                             wchlink_flash_data_received,
+                                             padded_length)) {
+                wchlink_write_mode = 0u;
+                wchlink_data_reply_status = rvswd_gpio_memory_last_error();
+                if (wchlink_data_reply_status == 0u) {
+                    wchlink_data_reply_status = 0x15u;
+                }
+                wchlink_data_reply_pending = true;
+                return;
+            }
+            wchlink_flash_data_received = padded_length;
+        }
+        {
             uint32_t result = 0xffffffffu;
+            uint32_t checksum_address = 0u;
             bool success;
 
-            // CH5xx loader 按完整 256 字节页求和和比较，尾页必须补齐擦除态
-            if (ch5xx_loader && wchlink_flash_data_received < padded_length) {
-                size_t padding_length = padded_length - wchlink_flash_data_received;
-
-                memset(wchlink_flash_padding, 0xff, padding_length);
-                if (!rvswd_gpio_write_memory(layout->data + wchlink_flash_data_received,
-                                             wchlink_flash_padding,
-                                             (uint32_t)padding_length)) {
-                    wchlink_write_mode = 0u;
-                    wchlink_data_reply_status = rvswd_gpio_memory_last_error();
-                    if (wchlink_data_reply_status == 0u) {
-                        wchlink_data_reply_status = 0x15u;
-                    }
-                    wchlink_data_reply_pending = true;
-                    return;
-                }
-                wchlink_flash_checksum = wchlink_checksum_add(
-                    wchlink_flash_checksum, wchlink_flash_padding, padding_length);
-                wchlink_flash_data_received = padded_length;
-            }
             if ((wchlink_flash_loader_mode & 0x10u) != 0u) {
-                uint32_t checksum_address = 0u;
-
-                // L103 和 CH5xx loader 都在目标 RAM 中接收主机计算的校验和，地址随族切换
-                if (ch5xx_loader) {
+                // L103 和 CH5xx loader 从目标 RAM 读取主机计算的校验和
+                if (wchlink_target_uses_ch5xx_loader()) {
                     checksum_address = WCHLINK_CH5XX_LOADER_CHECKSUM_ADDRESS;
                 } else if (wchlink_target_uses_l103_loader()) {
                     checksum_address = WCHLINK_L103_LOADER_CHECKSUM_ADDRESS;
@@ -561,10 +726,13 @@ void wchlink_protocol_write_data(const uint8_t *data, size_t length) {
                 wchlink_write_address += wchlink_flash_chunk_length;
                 wchlink_write_remaining -= wchlink_flash_chunk_length;
                 wchlink_flash_data_received = 0u;
+                wchlink_flash_transfer_received = 0u;
+                wchlink_flash_transfer_length = 0u;
                 wchlink_flash_checksum = 0u;
-                wchlink_flash_chunk_length = wchlink_write_remaining > WCHLINK_FLASH_CHUNK_SIZE
-                                                 ? WCHLINK_FLASH_CHUNK_SIZE
-                                                 : wchlink_write_remaining;
+                wchlink_flash_chunk_length =
+                    wchlink_write_remaining > WCHLINK_FLASH_CHUNK_SIZE
+                        ? WCHLINK_FLASH_CHUNK_SIZE
+                        : wchlink_write_remaining;
             } else {
                 wchlink_write_address = 0u;
                 wchlink_write_remaining = 0u;
@@ -649,6 +817,22 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
         return wchlink_unsupported(response, response_capacity,
                                     WCHLINK_FAMILY_DEVICE_MODE);
     }
+    if (family == WCHLINK_FAMILY_PARTIAL_WRITE && request_length >= 8u) {
+        uint32_t address = ((uint32_t)request[3] << 24u) |
+                           ((uint32_t)request[4] << 16u) |
+                           ((uint32_t)request[5] << 8u) | request[6];
+
+        if (!wchlink_connected || request[7] == 0u ||
+            request[7] > sizeof(wchlink_partial_write_data)) {
+            return wchlink_unsupported(response, response_capacity,
+                                        WCHLINK_FAMILY_PARTIAL_WRITE);
+        }
+        wchlink_partial_write_address = address;
+        wchlink_partial_write_length = request[7];
+        wchlink_write_mode = 3u;
+        return wchlink_command_reply(response, response_capacity,
+                                     WCHLINK_FAMILY_PARTIAL_WRITE, request[2]);
+    }
     if (family == 0x01u && request_length >= 11u) {
         uint32_t first = ((uint32_t)request[3] << 24u) |
                          ((uint32_t)request[4] << 16u) |
@@ -658,6 +842,8 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                           ((uint32_t)request[9] << 8u) | request[10];
 
         wchlink_clear_transfer_state();
+        memset(wchlink_partial_cache, 0xff, sizeof(wchlink_partial_cache));
+        wchlink_partial_cache_valid = true;
         wchlink_write_address = first;
         wchlink_write_remaining = second;
         wchlink_flash_chunk_length = wchlink_write_remaining > WCHLINK_FLASH_CHUNK_SIZE
@@ -720,16 +906,18 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x06u:
-                // Prepare 为可选命令，不参与上位机类型和后续状态判断
+                // 官方 OpenOCD 在地址设置前发送 Prepare，状态必须跨过地址帧保留
+                wchlink_flash_prepare_seen = true;
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
-            case 0x07u: {
+            case 0x07u:
+            case 0x0bu: {
                 const struct wchlink_loader_layout *layout =
                     wchlink_target_loader_layout();
                 uint32_t result = 0xffffffffu;
                 bool success;
 
-                // 0x07 是 loader 数据阶段的结束边界，成功和失败都不再接收数据
+                // 0x07 是 loader 数据阶段的结束边界，成功后立即切换到 Flash 数据接收
                 wchlink_write_mode = 0u;
                 if (wchlink_loader_error != 0u) {
                     if (response_capacity < 13u) {
@@ -760,13 +948,33 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                           result == 0u;
                 if (success) {
                     success = rvswd_gpio_execute(layout->entry, layout->stack_top,
-                                                 0x01u, 0u, 0u, layout->data,
+                                                 (wchlink_flash_prepare_seen &&
+                                                  !wchlink_target_uses_ch5xx_loader())
+                                                     ? 0x03u
+                                                     : 0x01u,
+                                                 0u, 0u, layout->data,
                                                  &result) &&
                               result == 0u;
                 }
                 if (success &&
                     response_capacity >= 4u) {
                     wchlink_loader_ready = true;
+                    // CH5xx 的 OpenOCD 路径只执行编程，V30x Prepare 路径附带校验
+                    wchlink_flash_loader_mode = request[3] == 0x0bu
+                                                    ? 0x10u
+                                                    : wchlink_target_uses_ch5xx_loader()
+                                                          ? 0x08u
+                                                          : (wchlink_flash_prepare_seen
+                                                                 ? 0x18u
+                                                                 : 0x08u);
+                    // WCH OpenOCD 在 0x07 回复后直接发送固定 4096 字节数据
+                    wchlink_write_mode = 2u;
+                    wchlink_flash_openocd_mode = true;
+                    wchlink_flash_data_received = 0u;
+                    wchlink_flash_transfer_received = 0u;
+                    wchlink_flash_transfer_length = 0u;
+                    wchlink_flash_checksum = 0u;
+                    wchlink_flash_prepare_seen = false;
                     return wchlink_command_reply(response, response_capacity, family,
                                                  request[3]);
                 }
@@ -788,13 +996,17 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
                 }
                 wchlink_write_mode = 2u;
                 wchlink_flash_data_received = 0u;
+                wchlink_flash_transfer_received = 0u;
+                wchlink_flash_transfer_length = 0u;
                 wchlink_flash_checksum = 0u;
+                wchlink_flash_openocd_mode = false;
                 // LinkE 用命令位组合选择 loader 的编程、校验和组合模式
                 wchlink_flash_loader_mode = request[3] == 0x02u ? 0x08u :
                                             request[3] == 0x03u ? 0x10u : 0x18u;
                 return wchlink_command_reply(response, response_capacity, family,
                                              request[3]);
             case 0x08u:
+                wchlink_flash_prepare_seen = false;
                 wchlink_clear_transfer_state();
                 return wchlink_ack(response, response_capacity, family);
             case 0x0cu:
@@ -912,6 +1124,7 @@ size_t wchlink_protocol_process(const uint8_t *request, size_t request_length,
             drv_power_switch_set_enabled(true);
             return wchlink_ack(response, response_capacity, family);
         case WCHLINK_CONTROL_POWER_5V_OFF:
+            wchlink_partial_cache_valid = false;
             wchlink_protocol_reset();
             drv_power_switch_set_enabled(false);
             return wchlink_ack(response, response_capacity, family);
