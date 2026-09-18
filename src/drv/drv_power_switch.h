@@ -4,3 +4,4 @@
 
 void drv_power_switch_init(void);
 void drv_power_switch_set_enabled(bool enabled);
+bool drv_power_switch_is_enabled(void);

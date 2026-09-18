@@ -62,7 +62,7 @@ int main(void) {
     chry_dap_init(0u, 0u);
 
     for (;;) {
-        // process_button();
+        process_button();
         cherrydap_process();
     }
 }

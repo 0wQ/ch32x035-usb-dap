@@ -356,9 +356,6 @@ static uint16_t USB_RespSize[DAP_PACKET_COUNT];                                 
 static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t cdc_discard_buffer[DAP_PACKET_SIZE];
 static volatile struct cdc_line_coding g_cdc_lincoding;
 
-// nRESET 电平影子，DAP_config.h 的 PIN_nRESET_IN 回读它
-uint32_t pin_nreset_shadow;
-
 void usbd_event_handler(uint8_t busid, uint8_t event) {
     (void)busid;
     switch (event) {

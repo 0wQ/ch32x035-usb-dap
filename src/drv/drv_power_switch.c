@@ -24,3 +24,7 @@ void drv_power_switch_set_enabled(bool enabled) {
         GPIO_ResetBits(GPIOB, POWER_EN_PIN);
     }
 }
+
+bool drv_power_switch_is_enabled(void) {
+    return GPIO_ReadOutputDataBit(GPIOB, POWER_EN_PIN) != Bit_RESET;
+}

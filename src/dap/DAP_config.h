@@ -5,6 +5,7 @@
 #include <ch32x035.h>
 
 #include "status/status_led.h"
+#include "drv/drv_power_switch.h"
 
 #ifndef __STATIC_INLINE
 #define __STATIC_INLINE static inline
@@ -107,11 +108,10 @@ __STATIC_FORCEINLINE void PIN_TDI_OUT(uint32_t bit) { (void)bit; }
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN(void) { return 0U; }
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN(void) { return 1U; }
 __STATIC_FORCEINLINE void PIN_nTRST_OUT(uint32_t bit) { (void)bit; }
-// 本板没有 nRESET 引脚，用电平影子回读最后一次写入的值
-// SWJ_Pins 在 wait 模式下靠读回值匹配请求值退出自旋，返回固定电平会让主机请求取反时死锁
-extern uint32_t pin_nreset_shadow;
-__STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void) { return pin_nreset_shadow; }
-__STATIC_FORCEINLINE void PIN_nRESET_OUT(uint32_t bit) { pin_nreset_shadow = bit & 1U; }
+// nRESET 通过目标电源开关实现，低电平断电，高电平恢复供电
+// 回读开关输出状态，不代表目标电源已经稳定
+__STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void) { return drv_power_switch_is_enabled(); }
+__STATIC_FORCEINLINE void PIN_nRESET_OUT(uint32_t bit) { drv_power_switch_set_enabled((bit & 1U) != 0U); }
 
 __STATIC_INLINE void PORT_JTAG_SETUP(void) {}
 __STATIC_INLINE void PORT_SWD_SETUP(void) {
@@ -134,7 +134,7 @@ __STATIC_INLINE void DAP_SETUP(void) {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
     PORT_OFF();
 }
-// 本板没有 nRESET 引脚，返回 0 表示复位未执行，主机据此回退到 SWD 软复位
+// 不提供独立的设备专用复位序列，主机可通过 SWJ_Pins 控制电源或执行 SWD 软复位
 __STATIC_INLINE uint8_t RESET_TARGET(void) {
     return 0U;
 }
