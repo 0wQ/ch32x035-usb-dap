@@ -31,20 +31,10 @@ static void systick_read_counter(uint32_t *high, uint32_t *low) {
     *high = high_after;
 }
 
-// 只计算 64 位计数值除以 divisor 后的低 32 位，避免 RV32 上的软件 64 位除法
+// 使用编译器除法，避免逐次执行 32 轮移位拖慢 DAP 主循环
+// 先换算完整计数值，再取低 32 位，保持时间接口的自然回绕
 static uint32_t systick_counter_to_units(uint32_t high, uint32_t low, uint32_t divisor) {
-    uint32_t remainder = high % divisor;
-    uint32_t result = 0u;
-
-    for (uint32_t mask = 0x80000000u; mask != 0u; mask >>= 1u) {
-        uint32_t next = (remainder << 1u) | ((low & mask) != 0u ? 1u : 0u);
-        if (next >= divisor) {
-            next -= divisor;
-            result |= mask;
-        }
-        remainder = next;
-    }
-    return result;
+    return (uint32_t)((((uint64_t)high << 32) | low) / divisor);
 }
 
 static void systick_wait_ticks(uint32_t ticks) {

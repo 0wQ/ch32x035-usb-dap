@@ -1,11 +1,11 @@
 #pragma once
 
+#include "drv/drv_power_switch.h"
+#include "status/status_led.h"
+
 #include <stdint.h>
 
 #include <ch32x035.h>
-
-#include "status/status_led.h"
-#include "drv/drv_power_switch.h"
 
 #ifndef __STATIC_INLINE
 #define __STATIC_INLINE static inline
@@ -81,18 +81,13 @@ __STATIC_FORCEINLINE void PIN_SWDIO_TMS_SET(void) { GPIOA->BSHR = GPIO_Pin_3; }
 __STATIC_FORCEINLINE void PIN_SWDIO_TMS_CLR(void) { GPIOA->BCR = GPIO_Pin_3; }
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN(void) { return (GPIOA->INDR & GPIO_Pin_3) != 0U; }
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT(uint32_t bit) {
-    if ((bit & 1U) != 0U)
-        GPIOA->BSHR = GPIO_Pin_3;
-    else
-        GPIOA->BCR = GPIO_Pin_3;
+    // 在 BSHR 的置位与复位半字间选择，避免每个数据位都执行条件分支
+    GPIOA->BSHR = (GPIO_Pin_3 << 16) >> ((bit & 1U) << 4);
 }
 // 设置 SWDIO 数据，并将 SWCLK 原子拉低，为下一个 SWD 数据位准备
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_SWCLK_CLR(uint32_t bit) {
-    // BSHR 高 16 位复位对应引脚，本操作同时置高 PA3 并拉低 PA2
-    if ((bit & 1U) != 0U)
-        GPIOA->BSHR = GPIO_Pin_3 | (GPIO_Pin_2 << 16);
-    else
-        GPIOA->BCR = GPIO_Pin_3 | GPIO_Pin_2;
+    // 同时设置 PA3 数据并拉低 PA2，bit 为 0 时选择 BSHR 的复位半字
+    GPIOA->BSHR = ((GPIO_Pin_3 << 16) >> ((bit & 1U) << 4)) | (GPIO_Pin_2 << 16);
 }
 // CFGLR 为 PA0 至 PA7 每个引脚分配 4 位，0x1 为推挽输出，0x4 为浮空输入
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_ENABLE(void) {
@@ -103,37 +98,52 @@ __STATIC_FORCEINLINE void PIN_SWDIO_OUT_DISABLE(void) {
     // PA3 的 12 至 15 位，释放 SWDIO 供目标驱动
     GPIOA->CFGLR = (GPIOA->CFGLR & ~(0xFU << 12)) | (0x4U << 12);
 }
+
 __STATIC_FORCEINLINE uint32_t PIN_TDI_IN(void) { return 0U; }
 __STATIC_FORCEINLINE void PIN_TDI_OUT(uint32_t bit) { (void)bit; }
 __STATIC_FORCEINLINE uint32_t PIN_TDO_IN(void) { return 0U; }
 __STATIC_FORCEINLINE uint32_t PIN_nTRST_IN(void) { return 1U; }
 __STATIC_FORCEINLINE void PIN_nTRST_OUT(uint32_t bit) { (void)bit; }
-// nRESET 通过目标电源开关实现，低电平断电，高电平恢复供电
-// 回读开关输出状态，不代表目标电源已经稳定
-__STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void) { return drv_power_switch_is_enabled(); }
-__STATIC_FORCEINLINE void PIN_nRESET_OUT(uint32_t bit) { drv_power_switch_set_enabled((bit & 1U) != 0U); }
+
+__STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void) {
+    return drv_power_switch_is_enabled();
+}
+
+__STATIC_FORCEINLINE void PIN_nRESET_OUT(uint32_t bit) {
+    drv_power_switch_set_enabled((bit & 1U) != 0U);
+}
 
 __STATIC_INLINE void PORT_JTAG_SETUP(void) {}
+
 __STATIC_INLINE void PORT_SWD_SETUP(void) {
     // PA2 为 SWCLK 输出，PA3 为 SWDIO 输出（读时由传输函数切输入）
     // 每个 PA0 至 PA7 的 CFGLR 字段占用 4 位，PA2 在 8 至 11 位，PA3 在 12 至 15 位
     GPIOA->BSHR = GPIO_Pin_2 | GPIO_Pin_3;
-    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xFU << 8) | (0xFU << 12))) |
-                   (0x1U << 8) | (0x1U << 12);
+    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xFU << 8) | (0xFU << 12))) | (0x1U << 8) | (0x1U << 12);
 }
+
 __STATIC_INLINE void PORT_OFF(void) {
     // DAP 端口关闭时，仅将 PA2、PA3 释放为浮空输入
-    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xFU << 8) | (0xFU << 12))) |
-                   (0x4U << 8) | (0x4U << 12);
+    GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xFU << 8) | (0xFU << 12))) | (0x4U << 8) | (0x4U << 12);
 }
-// DAP_HostStatus 在主循环上下文调用，此处只写状态，出帧由 status_led_process 统一处理
-__STATIC_INLINE void LED_CONNECTED_OUT(uint32_t bit) { status_led_set_connected(bit != 0u); }
-__STATIC_INLINE void LED_RUNNING_OUT(uint32_t bit) { status_led_set_running(bit != 0u); }
-__STATIC_INLINE uint32_t TIMESTAMP_GET(void) { return 0U; }
+
+__STATIC_INLINE void LED_CONNECTED_OUT(uint32_t bit) {
+    status_led_set_connected(bit != 0u);
+}
+
+__STATIC_INLINE void LED_RUNNING_OUT(uint32_t bit) {
+    status_led_set_running(bit != 0u);
+}
+
+__STATIC_INLINE uint32_t TIMESTAMP_GET(void) {
+    return 0U;
+}
+
 __STATIC_INLINE void DAP_SETUP(void) {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
     PORT_OFF();
 }
+
 // 不提供独立的设备专用复位序列，主机可通过 SWJ_Pins 控制电源或执行 SWD 软复位
 __STATIC_INLINE uint8_t RESET_TARGET(void) {
     return 0U;

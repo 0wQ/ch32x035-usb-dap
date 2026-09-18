@@ -74,6 +74,8 @@ __attribute__((section(".highcode"), noinline, optimize("O2"))) static void SWD_
     uint32_t n;
     uint32_t parity = SWD_Parity32(val);
 
+    // 展开 32 位数据输出，减少逐组循环的分支开销
+    #pragma GCC unroll 8
     for (n = 8U; n; n--) {
         SWD_FAST_WRITE_DATA_BIT();
         SWD_FAST_WRITE_DATA_BIT();
