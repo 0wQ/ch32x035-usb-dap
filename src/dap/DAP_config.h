@@ -4,6 +4,8 @@
 
 #include <ch32x035.h>
 
+#include "status/status_led.h"
+
 #ifndef __STATIC_INLINE
 #define __STATIC_INLINE static inline
 #endif
@@ -129,8 +131,9 @@ __STATIC_INLINE void PORT_OFF(void) {
     GPIOA->CFGLR = (GPIOA->CFGLR & ~((0xFU << 4) | (0xFU << 8) | (0xFU << 12) | (0xFU << 24))) |
                    (0x4U << 4) | (0x4U << 8) | (0x4U << 12) | (0x4U << 24);
 }
-__STATIC_INLINE void LED_CONNECTED_OUT(uint32_t bit) { (void)bit; }
-__STATIC_INLINE void LED_RUNNING_OUT(uint32_t bit) { (void)bit; }
+// DAP_HostStatus 在主循环上下文调用，此处只写状态，出帧由 status_led_process 统一处理
+__STATIC_INLINE void LED_CONNECTED_OUT(uint32_t bit) { status_led_set_connected(bit != 0u); }
+__STATIC_INLINE void LED_RUNNING_OUT(uint32_t bit) { status_led_set_running(bit != 0u); }
 __STATIC_INLINE uint32_t TIMESTAMP_GET(void) { return 0U; }
 __STATIC_INLINE void DAP_SETUP(void) {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);

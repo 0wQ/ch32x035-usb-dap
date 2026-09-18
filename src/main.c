@@ -4,6 +4,7 @@
 #include "drv/drv_uart_mux.h"
 #include "drv/drv_ws2816c.h"
 #include "dap_main.h"
+#include "status/status_led.h"
 
 #include <ch32x035.h>
 
@@ -14,6 +15,7 @@ static void __attribute__((section(".highcode"), noinline, optimize("O2"))) cher
     cherrydap_port_process();
     chry_dap_handle();
     chry_dap_usb2uart_handle();
+    status_led_process();
 }
 
 #define WS2816C_DIM_LEVEL 0x0100u
@@ -51,6 +53,7 @@ int main(void) {
     drv_power_switch_set_enabled(true);
     drv_ws2816c_init();
     ws2816c_show_startup_effect();
+    status_led_init();
 
     cherrydap_port_init();
     chry_dap_init(0u, 0u);

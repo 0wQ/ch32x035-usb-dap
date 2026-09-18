@@ -18,8 +18,11 @@
 #define WS2816C_CODE_0 0x60u
 #define WS2816C_CODE_1 0x7cu
 
+#define WS2816C_TIMEOUT_MS 10u
+
 static bool ws2816c_initialized;
 static bool ws2816c_dma_busy;
+static uint64_t ws2816c_dma_start_ms;
 static uint8_t ws2816c_dma_buffer[WS2816C_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
 
 static void ws2816c_config_mosi(GPIOMode_TypeDef mode) {
@@ -54,15 +57,14 @@ static uint16_t ws2816c_encode_pixels(const drv_ws2816c_pixel_t *pixels,
     return index;
 }
 
-static void ws2816c_wait_idle(void) {
-    if (!ws2816c_dma_busy) {
-        return;
-    }
-    while (DMA_GetCurrDataCounter(DMA1_Channel3) != 0u) {
-    }
-    while (SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_BSY) != RESET) {
-    }
+static void ws2816c_abort(void) {
+    DMA_Cmd(DMA1_Channel3, DISABLE);
+    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, DISABLE);
+    SPI_Cmd(SPI1, DISABLE);
+    GPIO_ResetBits(GPIOA, WS2816C_SPI_PINS);
+    ws2816c_config_mosi(GPIO_Mode_Out_PP);
     ws2816c_dma_busy = false;
+    ws2816c_initialized = false;
 }
 
 void drv_ws2816c_init(void) {
@@ -117,7 +119,7 @@ void drv_ws2816c_init(void) {
     bsp_delay_us(300u);
 }
 
-bool drv_ws2816c_write(const drv_ws2816c_pixel_t *pixels, size_t pixel_count) {
+bool drv_ws2816c_write_async(const drv_ws2816c_pixel_t *pixels, size_t pixel_count) {
     uint16_t transfer_length;
 
     if (!ws2816c_initialized || pixels == NULL || pixel_count > WS2816C_MAX_PIXELS) {
@@ -126,14 +128,51 @@ bool drv_ws2816c_write(const drv_ws2816c_pixel_t *pixels, size_t pixel_count) {
     if (pixel_count == 0u) {
         return true;
     }
+    if (ws2816c_dma_busy) {
+        return false;
+    }
 
-    ws2816c_wait_idle();
+    // 编码必须先于启动 DMA：缓冲区共用，传输期间不能再被改写
     transfer_length = ws2816c_encode_pixels(pixels, pixel_count);
     DMA_Cmd(DMA1_Channel3, DISABLE);
     DMA_ClearITPendingBit(DMA1_IT_GL3);
     DMA_SetCurrDataCounter(DMA1_Channel3, transfer_length);
-    DMA_Cmd(DMA1_Channel3, ENABLE);
+    ws2816c_dma_start_ms = bsp_time_ms();
     ws2816c_dma_busy = true;
-    ws2816c_wait_idle();
+    DMA_Cmd(DMA1_Channel3, ENABLE);
     return true;
+}
+
+void drv_ws2816c_process(void) {
+    if (!ws2816c_dma_busy) {
+        return;
+    }
+    if (DMA_GetFlagStatus(DMA1_FLAG_TE3) != RESET) {
+        ws2816c_abort();
+        return;
+    }
+    // DMA 计数归零只代表最后一个字节已入寄存器，仍需等待 SPI 移位结束
+    if (DMA_GetCurrDataCounter(DMA1_Channel3) != 0u ||
+        SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_BSY) != RESET) {
+        if (bsp_time_ms() - ws2816c_dma_start_ms >= WS2816C_TIMEOUT_MS) {
+            ws2816c_abort();
+        }
+        return;
+    }
+    DMA_Cmd(DMA1_Channel3, DISABLE);
+    ws2816c_dma_busy = false;
+}
+
+bool drv_ws2816c_ready(void) {
+    return ws2816c_initialized;
+}
+
+bool drv_ws2816c_write(const drv_ws2816c_pixel_t *pixels, size_t pixel_count) {
+    if (!drv_ws2816c_write_async(pixels, pixel_count)) {
+        return false;
+    }
+    while (ws2816c_dma_busy) {
+        drv_ws2816c_process();
+    }
+    return ws2816c_initialized;
 }

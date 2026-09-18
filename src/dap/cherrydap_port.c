@@ -4,6 +4,8 @@
 #include <ch32x035_dma.h>
 #include <ch32x035_tim.h>
 
+#include "status/status_led.h"
+
 // 半传输边界为 256 B，避免读取 DMA 正在写入的数据
 #define CHERRYDAP_UART_RX_DMA_SIZE      512U
 #define CHERRYDAP_UART_RX_DMA_HALF_SIZE (CHERRYDAP_UART_RX_DMA_SIZE / 2U)
@@ -72,6 +74,8 @@ static void cherrydap_uart_rx_dma_drain(void) {
     if (remaining != cherrydap_uart_rx_dma_last_remaining) {
         cherrydap_uart_rx_dma_last_remaining = remaining;
         cherrydap_uart_rx_dma_last_activity = now;
+        // 剩余计数变化即代表本周期真的收到了字节
+        status_led_notify_uart_activity();
     } else if ((uint16_t)(now - cherrydap_uart_rx_dma_last_activity) >= CHERRYDAP_UART_RX_IDLE_FLUSH_US &&
                remaining != CHERRYDAP_UART_RX_DMA_SIZE) {
         uint32_t wraps = cherrydap_uart_rx_dma_wraps;
@@ -117,7 +121,12 @@ static void cherrydap_uart_rx_dma_drain(void) {
 static void cherrydap_uart_tx_dma_start(uint8_t *data, uint16_t len) {
     DMA_InitTypeDef dma = {0};
 
-    if (data == NULL || len == 0U || cherrydap_uart_tx_dma_busy != 0U) {
+    if (data == NULL || len == 0U) {
+        return;
+    }
+    // 本函数也会从 DMA1_Channel7_IRQHandler 的链式续传调用，状态设置必须中断安全
+    status_led_notify_uart_activity();
+    if (cherrydap_uart_tx_dma_busy != 0U) {
         return;
     }
 
