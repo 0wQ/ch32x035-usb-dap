@@ -185,9 +185,7 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-#if (!USE_PIOC_ACC)
 __attribute__((section(".highcode")))
-#endif
 static uint8_t SWD_TransferFast(
     uint32_t request, uint32_t *data) {
     uint32_t ack;
@@ -407,9 +405,7 @@ static uint8_t SWD_TransferFast(
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-#if (!USE_PIOC_ACC)
 __attribute__((noinline))
-#endif
 static uint8_t SWD_TransferSlow(
     uint32_t request, uint32_t *data) {
     uint32_t ack;
@@ -627,13 +623,8 @@ static uint8_t SWD_TransferSlow(
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-#if (!USE_PIOC_ACC)
 __attribute__((section(".highcode")))
 uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
-#else
-__attribute__((noinline))
-uint8_t SWD_Transfer_GPIO(uint32_t request, uint32_t *data)
-#endif
 {
     if (DAP_Data.fast_clock) {
         return SWD_TransferFast(request, data);

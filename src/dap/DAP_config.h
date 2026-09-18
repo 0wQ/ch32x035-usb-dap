@@ -18,7 +18,6 @@
 #define IO_PORT_WRITE_CYCLES    2U
 #define DAP_SWD                 1
 #define DAP_JTAG                0
-#define USE_PIOC_ACC            0
 #define DAP_JTAG_DEV_CNT        1U
 #define DAP_DEFAULT_PORT        1U
 #define DAP_DEFAULT_SWJ_CLOCK   1000000U
