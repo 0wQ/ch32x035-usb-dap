@@ -9,7 +9,8 @@ end
 
 local function first_existing_tool_prefix(candidates, toolname)
     for _, prefix in ipairs(candidates) do
-        if os.isfile(prefix .. toolname) then
+        -- os.isfile 不补可执行后缀，Windows 上的工具链文件名带 .exe
+        if os.isfile(prefix .. toolname) or os.isfile(prefix .. toolname .. ".exe") then
             return prefix
         end
     end
