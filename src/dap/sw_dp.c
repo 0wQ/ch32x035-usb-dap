@@ -29,9 +29,6 @@
 
 #include <DAP.h>
 
-uint8_t SWD_SPI_Active(void);
-uint8_t SWD_Transfer_SPI(uint32_t request, uint32_t *data);
-
 // SW Macros
 
 #define PIN_SWCLK_SET PIN_SWCLK_TCK_SET
@@ -200,9 +197,9 @@ static uint8_t SWD_TransferFast(
     uint32_t packed;
 
     uint32_t n;
-    const uint32_t swdio_cfglr_base = GPIOA->CFGLR & ~(0xFU << 28);
-    const uint32_t swdio_cfglr_output = swdio_cfglr_base | (0x1U << 28);
-    const uint32_t swdio_cfglr_input = swdio_cfglr_base | (0x4U << 28);
+    const uint32_t swdio_cfglr_base = GPIOA->CFGLR & ~(0xFU << 12);
+    const uint32_t swdio_cfglr_output = swdio_cfglr_base | (0x1U << 12);
+    const uint32_t swdio_cfglr_input = swdio_cfglr_base | (0x4U << 12);
 
     /* Packet Request */
     parity = 0U;
@@ -293,16 +290,16 @@ static uint8_t SWD_TransferFast(
             val = 0U;
             for (n = 8U; n; n--) {
                 SWD_FAST_READ_SAMPLE(bit);
-                packed = (bit >> 7) & 0x01U;
+                packed = (bit >> 3) & 0x01U;
                 SWD_FAST_PACK_BARRIER();
                 SWD_FAST_READ_SAMPLE(bit);
-                packed |= (bit >> 6) & 0x02U;
+                packed |= ((bit >> 3) & 0x01U) << 1;
                 SWD_FAST_PACK_BARRIER();
                 SWD_FAST_READ_SAMPLE(bit);
-                packed |= (bit >> 5) & 0x04U;
+                packed |= ((bit >> 3) & 0x01U) << 2;
                 SWD_FAST_PACK_BARRIER();
                 SWD_FAST_READ_SAMPLE(bit);
-                packed |= (bit >> 4) & 0x08U;
+                packed |= ((bit >> 3) & 0x01U) << 3;
                 SWD_FAST_PACK_BARRIER();
                 val = (val >> 4) | (packed << 28);
             }
@@ -638,10 +635,6 @@ __attribute__((noinline))
 uint8_t SWD_Transfer_GPIO(uint32_t request, uint32_t *data)
 #endif
 {
-    if (SWD_SPI_Active()) {
-        return SWD_Transfer_SPI(request, data);
-    }
-
     if (DAP_Data.fast_clock) {
         return SWD_TransferFast(request, data);
     } else {

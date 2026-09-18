@@ -10,6 +10,8 @@
 #define CHERRYDAP_UART_RX_DMA_MASK      (CHERRYDAP_UART_RX_DMA_SIZE - 1U)
 #define CHERRYDAP_UART_RX_IDLE_FLUSH_US 1000U
 
+#if CHERRYDAP_UART_ENABLE
+
 static uint8_t cherrydap_uart_rx_dma_buffer[CHERRYDAP_UART_RX_DMA_SIZE] __attribute__((aligned(4)));
 static volatile uint32_t cherrydap_uart_rx_dma_wraps;
 static volatile uint32_t cherrydap_uart_rx_dma_completed;
@@ -265,3 +267,13 @@ void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_coding)
 void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len) {
     cherrydap_uart_tx_dma_start(data, len);
 }
+
+#else
+
+void cherrydap_port_init(void) {
+}
+
+void cherrydap_port_process(void) {
+}
+
+#endif

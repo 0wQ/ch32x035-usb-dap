@@ -18,8 +18,8 @@
 // 使用标准库 memcpy
 #define CONFIG_USB_MEMCPY_DISABLE
 
-// EP0 控制传输缓冲区
-#define CONFIG_USBDEV_REQUEST_BUFFER_LEN 256
+// EP0 控制传输缓冲区；MS OS 2.0 描述符集合为 330 字节
+#define CONFIG_USBDEV_REQUEST_BUFFER_LEN 512
 
 // 使用结构体描述符接口
 #define CONFIG_USBDEV_ADVANCE_DESC
