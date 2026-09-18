@@ -16,5 +16,6 @@ venv/
 .doc/
 .docs/
 .claude/
+.commandcode/
 AGENTS.md
 CLAUDE.md

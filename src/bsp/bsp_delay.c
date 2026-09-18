@@ -18,19 +18,53 @@ static bool delay_initialized;
 static uint32_t systick_ticks_per_us;
 static uint32_t systick_ticks_per_ms;
 
-static uint64_t systick_read_counter(void) {
+static void systick_read_counter(uint32_t *high, uint32_t *low) {
     uint32_t high_before;
     uint32_t high_after;
-    uint32_t low;
 
-    // RV32 分两次读取 64 位计数器，高位跨越时重新读取
     do {
         high_before = SYSTICK_CNTH;
-        low = SYSTICK_CNTL;
+        *low = SYSTICK_CNTL;
         high_after = SYSTICK_CNTH;
     } while (high_before != high_after);
 
-    return ((uint64_t)high_after << 32U) | low;
+    *high = high_after;
+}
+
+// 只计算 64 位计数值除以 divisor 后的低 32 位，避免 RV32 上的软件 64 位除法
+static uint32_t systick_counter_to_units(uint32_t high, uint32_t low, uint32_t divisor) {
+    uint32_t remainder = high % divisor;
+    uint32_t result = 0u;
+
+    for (uint32_t mask = 0x80000000u; mask != 0u; mask >>= 1u) {
+        uint32_t next = (remainder << 1u) | ((low & mask) != 0u ? 1u : 0u);
+        if (next >= divisor) {
+            next -= divisor;
+            result |= mask;
+        }
+        remainder = next;
+    }
+    return result;
+}
+
+static void systick_wait_ticks(uint32_t ticks) {
+    uint32_t start = SYSTICK_CNTL;
+
+    while ((uint32_t)(SYSTICK_CNTL - start) < ticks) {
+    }
+}
+
+static void delay_units(uint32_t units, uint32_t ticks_per_unit) {
+    if (!delay_initialized || units == 0u || ticks_per_unit == 0u) {
+        return;
+    }
+
+    const uint32_t max_units = UINT32_MAX / ticks_per_unit;
+    while (units != 0u) {
+        const uint32_t chunk = units > max_units ? max_units : units;
+        systick_wait_ticks(chunk * ticks_per_unit);
+        units -= chunk;
+    }
 }
 
 void bsp_delay_init(void) {
@@ -38,64 +72,49 @@ void bsp_delay_init(void) {
         return;
     }
 
-    SYSTICK_CTLR = 0;
-    SYSTICK_SR = 0;
-    SYSTICK_CNTL = 0;
-    SYSTICK_CNTH = 0;
+    SystemCoreClockUpdate();
+    SYSTICK_CTLR = 0u;
+    SYSTICK_SR = 0u;
+    SYSTICK_CNTL = 0u;
+    SYSTICK_CNTH = 0u;
     SYSTICK_CMPL = UINT32_MAX;
     SYSTICK_CMPH = UINT32_MAX;
 
-    // SDK 支持的系统时钟均为整数 MHz，直接使用整数 tick 换算
-    systick_ticks_per_us = SystemCoreClock / 1000000U;
-    systick_ticks_per_ms = SystemCoreClock / 1000U;
+    systick_ticks_per_us = SystemCoreClock / 1000000u;
+    systick_ticks_per_ms = SystemCoreClock / 1000u;
+    if (systick_ticks_per_us == 0u || systick_ticks_per_ms == 0u) {
+        return;
+    }
     SYSTICK_CTLR = SYSTICK_CTLR_ENABLE | SYSTICK_CTLR_STCLK_HCLK;
     delay_initialized = true;
 }
 
 void bsp_delay_us(uint32_t us) {
-    uint64_t ticks;
-
-    if (us == 0U) {
-        return;
-    }
-
-    uint32_t start = SYSTICK_CNTL;
-    ticks = (uint64_t)us * systick_ticks_per_us;
-    if (ticks <= UINT32_MAX) {
-        while ((uint32_t)(SYSTICK_CNTL - start) < (uint32_t)ticks) {
-        }
-        return;
-    }
-
-    uint64_t start64 = systick_read_counter();
-    while ((systick_read_counter() - start64) < ticks) {
-    }
+    delay_units(us, systick_ticks_per_us);
 }
 
 void bsp_delay_ms(uint32_t ms) {
-    uint64_t ticks;
-
-    if (ms == 0U) {
-        return;
-    }
-
-    uint32_t start = SYSTICK_CNTL;
-    ticks = (uint64_t)ms * systick_ticks_per_ms;
-    if (ticks <= UINT32_MAX) {
-        while ((uint32_t)(SYSTICK_CNTL - start) < (uint32_t)ticks) {
-        }
-        return;
-    }
-
-    uint64_t start64 = systick_read_counter();
-    while ((systick_read_counter() - start64) < ticks) {
-    }
+    delay_units(ms, systick_ticks_per_ms);
 }
 
-uint64_t bsp_time_us(void) {
-    return systick_read_counter() / systick_ticks_per_us;
+uint32_t bsp_time_us(void) {
+    uint32_t high;
+    uint32_t low;
+
+    if (!delay_initialized) {
+        return 0u;
+    }
+    systick_read_counter(&high, &low);
+    return systick_counter_to_units(high, low, systick_ticks_per_us);
 }
 
-uint64_t bsp_time_ms(void) {
-    return systick_read_counter() / systick_ticks_per_ms;
+uint32_t bsp_time_ms(void) {
+    uint32_t high;
+    uint32_t low;
+
+    if (!delay_initialized) {
+        return 0u;
+    }
+    systick_read_counter(&high, &low);
+    return systick_counter_to_units(high, low, systick_ticks_per_ms);
 }

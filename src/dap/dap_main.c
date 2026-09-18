@@ -10,7 +10,7 @@
 #define USBD_WINUSB_VENDOR_CODE 0x20
 #define USBD_WEBUSB_VENDOR_CODE 0x21
 
-#define USBD_WEBUSB_ENABLE 1
+#define USBD_WEBUSB_ENABLE 0
 #define USBD_BULK_ENABLE   1
 #define USBD_WINUSB_ENABLE 1
 
@@ -134,7 +134,7 @@ __ALIGN_BEGIN const uint8_t USBD_BinaryObjectStoreDescriptor[] = {
     WBVAL(0x0100),
     /* 1.00 */               /* bcdVersion */
     USBD_WEBUSB_VENDOR_CODE, /* bVendorCode */
-    0,                       /* iLandingPage */
+    1,                       /* iLandingPage */
 #endif
 #if (USBD_WINUSB_ENABLE)
     USBD_WINUSB_DESC_LEN,           /* bLength */
@@ -416,8 +416,7 @@ void usbd_event_handler(uint8_t busid, uint8_t event) {
     }
 }
 
-void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-    __attribute__((section(".highcode")));
+void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode")));
 void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     if (USB_Request[USB_RequestIndexI][0] == ID_DAP_TransferAbort) {
@@ -438,8 +437,7 @@ void dap_out_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     }
 }
 
-void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes)
-    __attribute__((section(".highcode")));
+void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode")));
 void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     if (USB_ResponseCountI != USB_ResponseCountO) {
@@ -455,8 +453,7 @@ void dap_in_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     }
 }
 
-void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes)
-    __attribute__((section(".highcode"), noinline));
+void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode"), noinline));
 void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     (void)ep;
@@ -484,8 +481,7 @@ void usbd_cdc_acm_bulk_out(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     }
 }
 
-void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes)
-    __attribute__((section(".highcode"), noinline));
+void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes) __attribute__((section(".highcode"), noinline));
 void usbd_cdc_acm_bulk_in(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)busid;
     (void)ep;

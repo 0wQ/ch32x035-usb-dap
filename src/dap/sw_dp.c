@@ -1,30 +1,3 @@
-/*
- * Copyright (c) 2013-2017 ARM Limited. All rights reserved.
- *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Licensed under the Apache License, Version 2.0 (the License); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an AS IS BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * ----------------------------------------------------------------------
- *
- * $Date:        1. December 2017
- * $Revision:    V2.0.0
- *
- * Project:      CMSIS-DAP Source
- * Title:        SW_DP.c CMSIS-DAP SW DP I/O
- *
- *---------------------------------------------------------------------------*/
-
 #include "DAP_config.h"
 
 #include <DAP.h>
@@ -185,8 +158,7 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-__attribute__((section(".highcode")))
-static uint8_t SWD_TransferFast(
+__attribute__((section(".highcode"))) static uint8_t SWD_TransferFast(
     uint32_t request, uint32_t *data) {
     uint32_t ack;
     uint32_t bit;
@@ -405,8 +377,7 @@ static uint8_t SWD_TransferFast(
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-__attribute__((noinline))
-static uint8_t SWD_TransferSlow(
+__attribute__((noinline)) static uint8_t SWD_TransferSlow(
     uint32_t request, uint32_t *data) {
     uint32_t ack;
     uint32_t bit;
@@ -623,9 +594,7 @@ static uint8_t SWD_TransferSlow(
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
 //   return:  ACK[2:0]
-__attribute__((section(".highcode")))
-uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
-{
+__attribute__((section(".highcode"))) uint8_t SWD_Transfer(uint32_t request, uint32_t *data) {
     if (DAP_Data.fast_clock) {
         return SWD_TransferFast(request, data);
     } else {

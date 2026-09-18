@@ -35,22 +35,27 @@ static const drv_ws2816c_pixel_t state_colors[] = {
     [LED_STATE_UART] = {.red = COLOR_LEVEL, .green = COLOR_LEVEL, .blue = COLOR_LEVEL},
 };
 
-// 只保存 DAP 基础状态，UART 由 uart_deadline_ms 派生，因此不需要额外的回落状态
+// 只保存 DAP 基础状态，UART 超时后回落到该状态
 static enum led_state led_state;
-// 时基为 64 位，中断侧只置标志，由主循环换算成截止时间，避免非原子写
+// 中断侧只置标志，由主循环维护时间状态
 static volatile bool uart_seen;
-static uint64_t uart_deadline_ms;
+static bool uart_active;
+static uint32_t uart_deadline_ms;
 static bool display_valid;
 static drv_ws2816c_pixel_t display_pixel;
-static uint64_t next_frame_ms;
-static uint64_t retry_deadline_ms;
+static uint32_t next_frame_ms;
+static uint32_t retry_deadline_ms;
 static bool retry_armed;
+
+static bool time_reached(uint32_t now, uint32_t deadline) {
+    return (int32_t)(now - deadline) >= 0;
+}
 
 // 三角波过 smoothstep 3x^2-2x^3，返回 0..255，无浮点也无查表
 // 相位直接取自绝对时间，全局唯一周期，因此没有需要维护的呼吸状态
-static uint32_t breath_coefficient(uint64_t now, uint32_t period) {
+static uint32_t breath_coefficient(uint32_t now, uint32_t period) {
     uint32_t half = period / 2u;
-    uint32_t phase = (uint32_t)(now % period);
+    uint32_t phase = now % period;
     uint32_t t = phase < half ? phase : period - phase;
     uint32_t x = t * 255u / half;
     return x * x * (768u - 2u * x) / 65536u;
@@ -69,8 +74,8 @@ static bool pixel_equal(drv_ws2816c_pixel_t a, drv_ws2816c_pixel_t b) {
 }
 
 // 先按状态取色，UART 活跃时只覆盖颜色，呼吸值不受影响
-static drv_ws2816c_pixel_t state_pixel(uint64_t now) {
-    enum led_state state = now < uart_deadline_ms ? LED_STATE_UART : led_state;
+static drv_ws2816c_pixel_t state_pixel(uint32_t now) {
+    enum led_state state = uart_active ? LED_STATE_UART : led_state;
     uint32_t period = state == LED_STATE_RUNNING ? BREATH_FAST_MS : BREATH_MS;
     return scaled_pixel(state_colors[state], breath_coefficient(now, period));
 }
@@ -78,6 +83,7 @@ static drv_ws2816c_pixel_t state_pixel(uint64_t now) {
 void status_led_init(void) {
     led_state = LED_STATE_IDLE;
     uart_seen = false;
+    uart_active = false;
     uart_deadline_ms = 0u;
     display_valid = false;
     display_pixel = (drv_ws2816c_pixel_t){0};
@@ -107,17 +113,20 @@ void status_led_notify_uart_activity(void) {
 }
 
 void status_led_process(void) {
-    uint64_t now = bsp_time_ms();
+    uint32_t now = bsp_time_ms();
 
     // 帧间隔和 DMA 回收都在毫秒量级，先做一次最便宜的时间判断再碰外设
     // 一帧必定结束，逐轮轮询 DMA 与 SPI 寄存器只会拖慢主循环
-    if (now < next_frame_ms) {
+    if (display_valid && !time_reached(now, next_frame_ms)) {
         return;
     }
 
     if (uart_seen) {
         uart_seen = false;
+        uart_active = true;
         uart_deadline_ms = now + UART_HOLD_MS;
+    } else if (uart_active && time_reached(now, uart_deadline_ms)) {
+        uart_active = false;
     }
 
     drv_ws2816c_process();
@@ -127,7 +136,7 @@ void status_led_process(void) {
         if (!retry_armed) {
             retry_armed = true;
             retry_deadline_ms = now + RETRY_MS;
-        } else if (now >= retry_deadline_ms) {
+        } else if (time_reached(now, retry_deadline_ms)) {
             retry_armed = false;
             drv_ws2816c_init();
             invalidate();

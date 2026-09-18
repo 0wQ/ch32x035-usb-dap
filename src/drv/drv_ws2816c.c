@@ -22,7 +22,7 @@
 
 static bool ws2816c_initialized;
 static bool ws2816c_dma_busy;
-static uint64_t ws2816c_dma_start_ms;
+static uint32_t ws2816c_dma_start_ms;
 static uint8_t ws2816c_dma_buffer[WS2816C_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
 
 static void ws2816c_config_mosi(GPIOMode_TypeDef mode) {
@@ -154,7 +154,7 @@ void drv_ws2816c_process(void) {
     // DMA 计数归零只代表最后一个字节已入寄存器，仍需等待 SPI 移位结束
     if (DMA_GetCurrDataCounter(DMA1_Channel3) != 0u ||
         SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_BSY) != RESET) {
-        if (bsp_time_ms() - ws2816c_dma_start_ms >= WS2816C_TIMEOUT_MS) {
+        if ((uint32_t)(bsp_time_ms() - ws2816c_dma_start_ms) >= WS2816C_TIMEOUT_MS) {
             ws2816c_abort();
         }
         return;
