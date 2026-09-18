@@ -96,13 +96,11 @@ target("firmware")
                        "third_party/cherryusb/class/hid",
                        "third_party/cherryusb_port")
 
-    -- CherryDAP, CherryRB
+    -- CherryDAP
     add_files("third_party/cherrydap/DAP/Source/DAP.c",
-              "third_party/cherrydap/DAP/Source/DAP_vendor.c",
-              "third_party/cherryrb/chry_ringbuffer.c")
+              "third_party/cherrydap/DAP/Source/DAP_vendor.c")
     add_sysincludedirs("third_party/cherrydap",
-                       "third_party/cherrydap/DAP/Include",
-                       "third_party/cherryrb")
+                       "third_party/cherrydap/DAP/Include")
 
     -- 编译、汇编与链接选项
     add_cxflags(table.join(arch_flags, {

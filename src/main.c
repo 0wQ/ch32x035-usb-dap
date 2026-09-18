@@ -10,13 +10,8 @@
 
 #include <ch32x035.h>
 
-void cherrydap_port_init(void);
-void cherrydap_port_process(void);
-
 static void __attribute__((section(".highcode"), noinline, optimize("O2"))) cherrydap_process(void) {
-    cherrydap_port_process();
     chry_dap_handle();
-    chry_dap_usb2uart_handle();
     status_led_process();
 }
 
@@ -64,11 +59,10 @@ int main(void) {
 
     drv_button_init();
 
-    cherrydap_port_init();
     chry_dap_init(0u, 0u);
 
     for (;;) {
-        process_button();
+        // process_button();
         cherrydap_process();
     }
 }

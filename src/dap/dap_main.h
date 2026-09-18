@@ -4,7 +4,6 @@
 #include "DAP_config.h"
 
 #include <DAP.h>
-#include <chry_ringbuffer.h>
 #include <usbd_cdc.h>
 #include <usbd_core.h>
 #include <usbd_hid.h>
@@ -44,9 +43,6 @@
 #define HID_PACKET_SIZE 64
 #endif
 
-#define CONFIG_UARTRX_RINGBUF_SIZE 2048U
-#define CONFIG_USBRX_RINGBUF_SIZE  2048U
-
 #ifndef CONFIG_CHERRYDAP_USE_MSC
 #define CONFIG_CHERRYDAP_USE_MSC 0
 #endif
@@ -63,24 +59,9 @@ extern char serial_number_dynamic[36];
 
 extern struct usbd_interface hid_intf;
 
-extern chry_ringbuffer_t g_uartrx;
-extern chry_ringbuffer_t g_usbrx;
-
 void chry_dap_init(uint8_t busid, uint32_t reg_base);
 
 void chry_dap_handle(void) __attribute__((section(".highcode")));
-
-void chry_dap_usb2uart_handle(void);
-
-/* implment by user */
-extern void chry_dap_usb2uart_uart_config_callback(struct cdc_line_coding *line_coding);
-
-/* implment by user */
-extern void chry_dap_usb2uart_uart_send_bydma(uint8_t *data, uint16_t len);
-
-bool chry_dap_usb2uart_uart_take_next(uint32_t completed, uint8_t **data, uint16_t *len);
-
-void chry_dap_usb2uart_uart_send_complete(uint32_t size);
 
 /* implment by user */
 extern void hid_custom_notify_handler(uint8_t busid, uint8_t event, void *arg);

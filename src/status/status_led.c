@@ -6,41 +6,30 @@
 #include <stdint.h>
 
 // 每个状态一种固定颜色，统一走呼吸动画，只有周期不同：
-//   IDLE 蓝慢呼吸、CONNECTED 绿慢呼吸、RUNNING 同蓝但周期减半
-//   UART 活跃时只替换颜色，周期与相位不动，避免突兀的亮度跳变
+//   IDLE 红慢呼吸、CONNECTED 绿慢呼吸、RUNNING 蓝但周期减半
 //
 // 出帧限速
 #define FRAME_INTERVAL_MS 10u
-// 串口活动叠加层的保持时间，必须明显长于主机的发包间隔
-// 否则间隔发送时白色会反复过期又续上，与基础色形成硬切闪烁
-#define UART_HOLD_MS 500u
-#define BREATH_MS      2000u
-#define BREATH_FAST_MS 1000u
-#define RETRY_MS       1000u
-// 四个颜色共用的通道电平（16 位），只影响亮度不影响色相
+#define BREATH_MS         2000u
+#define BREATH_FAST_MS    1000u
+#define RETRY_MS          1000u
+// 三个颜色共用的通道电平（16 位），只影响亮度不影响色相
 #define COLOR_LEVEL 0x0400u
 
 enum led_state {
     LED_STATE_IDLE,
     LED_STATE_CONNECTED,
     LED_STATE_RUNNING,
-    LED_STATE_UART,
 };
 
-// 四个状态只有点亮的通道不同，电平值完全一致
+// 三个状态只有点亮的通道不同，电平值完全一致
 static const drv_ws2816c_pixel_t state_colors[] = {
     [LED_STATE_IDLE] = {.red = COLOR_LEVEL},
     [LED_STATE_CONNECTED] = {.green = COLOR_LEVEL},
     [LED_STATE_RUNNING] = {.blue = COLOR_LEVEL},
-    [LED_STATE_UART] = {.red = COLOR_LEVEL, .green = COLOR_LEVEL, .blue = COLOR_LEVEL},
 };
 
-// 只保存 DAP 基础状态，UART 超时后回落到该状态
 static enum led_state led_state;
-// 中断侧只置标志，由主循环维护时间状态
-static volatile bool uart_seen;
-static bool uart_active;
-static uint32_t uart_deadline_ms;
 static bool display_valid;
 static drv_ws2816c_pixel_t display_pixel;
 static uint32_t next_frame_ms;
@@ -73,18 +62,13 @@ static bool pixel_equal(drv_ws2816c_pixel_t a, drv_ws2816c_pixel_t b) {
     return a.red == b.red && a.green == b.green && a.blue == b.blue;
 }
 
-// 先按状态取色，UART 活跃时只覆盖颜色，呼吸值不受影响
 static drv_ws2816c_pixel_t state_pixel(uint32_t now) {
-    enum led_state state = uart_active ? LED_STATE_UART : led_state;
-    uint32_t period = state == LED_STATE_RUNNING ? BREATH_FAST_MS : BREATH_MS;
-    return scaled_pixel(state_colors[state], breath_coefficient(now, period));
+    uint32_t period = led_state == LED_STATE_RUNNING ? BREATH_FAST_MS : BREATH_MS;
+    return scaled_pixel(state_colors[led_state], breath_coefficient(now, period));
 }
 
 void status_led_init(void) {
     led_state = LED_STATE_IDLE;
-    uart_seen = false;
-    uart_active = false;
-    uart_deadline_ms = 0u;
     display_valid = false;
     display_pixel = (drv_ws2816c_pixel_t){0};
     next_frame_ms = 0u;
@@ -108,10 +92,6 @@ void status_led_set_running(bool running) {
     invalidate();
 }
 
-void status_led_notify_uart_activity(void) {
-    uart_seen = true;
-}
-
 void status_led_process(void) {
     uint32_t now = bsp_time_ms();
 
@@ -119,14 +99,6 @@ void status_led_process(void) {
     // 一帧必定结束，逐轮轮询 DMA 与 SPI 寄存器只会拖慢主循环
     if (display_valid && !time_reached(now, next_frame_ms)) {
         return;
-    }
-
-    if (uart_seen) {
-        uart_seen = false;
-        uart_active = true;
-        uart_deadline_ms = now + UART_HOLD_MS;
-    } else if (uart_active && time_reached(now, uart_deadline_ms)) {
-        uart_active = false;
     }
 
     drv_ws2816c_process();
