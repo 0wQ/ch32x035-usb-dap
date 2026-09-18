@@ -19,7 +19,7 @@
 依赖 CherryUSB、CherryRB 和 CherryDAP，以 submodule 形式提供，需要初始化：
 
 ```sh
-git submodule update --init --recursive
+git submodule update --init
 ```
 
 ## 构建
